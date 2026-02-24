@@ -1,14 +1,18 @@
 import dotenv from 'dotenv'
 dotenv.config()
 
-const requiredEnvVariables=['Database_url','port']
-for (const items of requiredEnvVariables){
-    if(!process.env[items]){
-        throw new Error ('an environmental variable  has not been congigured')
-    }
-};
+const dbUrl = process.env.Database_url
+const portValue = process.env.PORT ?? process.env.port
+
+const missingVars: string[] = []
+if (!dbUrl) missingVars.push('Database_url')
+if (!portValue) missingVars.push('PORT (or port)')
+
+if (missingVars.length > 0) {
+  throw new Error(`Missing required environment variables: ${missingVars.join(', ')}`)
+}
 
 export const config = {
-  port: Number(process.env.port),
-  Database_url:String(process.env.Database_url)
-};
+  port: Number(portValue),
+  Database_url: String(dbUrl)
+}
