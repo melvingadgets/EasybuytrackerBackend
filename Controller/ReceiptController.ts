@@ -134,7 +134,14 @@ export const GetPendingReceipts = async (_req: Request, res: Response) => {
   try {
     const receipts = await ReceiptModel.find({ status: "pending" })
       .sort({ createdAt: -1 })
-      .populate("user", "fullName email")
+      .populate({
+        path: "user",
+        select: "fullName email createdByAdmin",
+        populate: {
+          path: "createdByAdmin",
+          select: "fullName email role",
+        },
+      })
       .select({ amount: 1, fileUrl: 1, fileType: 1, status: 1, createdAt: 1, user: 1 })
       .lean();
 
@@ -159,21 +166,30 @@ export const ApproveReceiptPayment = async (req: Request, res: Response) => {
       return res.status(400).json({ message: "receiptId is required" });
     }
 
-    const receipt = await ReceiptModel.findById(receiptId);
-    if (!receipt) {
-      return res.status(404).json({ message: "Receipt not found" });
-    }
+    const approvedAt = new Date();
+    const receipt = await ReceiptModel.findOneAndUpdate(
+      { _id: receiptId, status: "pending" },
+      {
+        $set: {
+          status: "approved",
+          approvedAt,
+        },
+      },
+      { returnDocument: "after" }
+    ).lean();
 
-    if (receipt.status === "approved") {
+    if (!receipt) {
+      const existingReceipt = await ReceiptModel.findById(receiptId).select({ _id: 1, status: 1 }).lean();
+      if (!existingReceipt) {
+        return res.status(404).json({ message: "Receipt not found" });
+      }
+
       return res.status(409).json({ message: "Receipt is already approved" });
     }
 
-    receipt.status = "approved";
-    receipt.approvedAt = new Date();
-    await receipt.save();
     const reason = normalizeReason(req.body?.reason);
 
-    if (actorId && (actorRole === "Admin" || actorRole === "SuperAdmin")) {
+    if (actorId && actorRole === "SuperAdmin") {
       await AuditLogModel.create({
         actor: actorId,
         actorRole,

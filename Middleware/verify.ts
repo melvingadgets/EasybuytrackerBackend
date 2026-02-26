@@ -1,6 +1,7 @@
 import type { NextFunction, Request, Response } from "express";
 import jwt, { type JwtPayload } from "jsonwebtoken";
 import SessionModel from "../Model/SessionModel.js";
+import UserModel from "../Model/UserModel.js";
 
 type AppRole = "Admin" | "User" | "SuperAdmin";
 
@@ -41,13 +42,14 @@ export const verifyToken = async (req: Request, res: Response, next: NextFunctio
 
   try {
     const payload = jwt.verify(token, JWT_SECRET) as TokenPayload;
-    if (!payload?._id || !payload?.role || !payload?.email || !payload?.userName) {
+    if (!payload?._id) {
       return res.status(401).json({ message: "invalid token payload" });
     }
 
+    let activeSession: { _id: unknown; role?: AppRole } | null = null;
     if (payload.jti) {
       const now = new Date();
-      const activeSession = await SessionModel.findOneAndUpdate(
+      activeSession = await SessionModel.findOneAndUpdate(
         {
           jti: payload.jti,
           user: payload._id,
@@ -62,11 +64,25 @@ export const verifyToken = async (req: Request, res: Response, next: NextFunctio
       }
     }
 
+    const liveUser = await UserModel.findById(payload._id)
+      .select({ fullName: 1, email: 1, role: 1 })
+      .lean();
+    if (!liveUser) {
+      return res.status(401).json({ message: "user not found" });
+    }
+
+    if (payload.jti && activeSession?.role && activeSession.role !== liveUser.role) {
+      await SessionModel.updateOne(
+        { jti: payload.jti, user: payload._id },
+        { $set: { role: liveUser.role } }
+      );
+    }
+
     const currentUser: Request["user"] = {
-      _id: String(payload._id),
-      userName: String(payload.userName),
-      email: String(payload.email),
-      role: payload.role,
+      _id: String(liveUser._id),
+      userName: String(liveUser.fullName || ""),
+      email: String(liveUser.email || ""),
+      role: liveUser.role,
     };
     if (payload.jti) {
       currentUser.jti = String(payload.jti);

@@ -46,6 +46,10 @@ const WEEKLY_ONLY_MODELS = new Set([
   "iPhone 11",
   "iPhone 11 Pro",
   "iPhone 11 Pro Max",
+  "iPhone 12",
+  "iPhone 12 mini",
+  "iPhone 12 Pro",
+  "iPhone 12 Pro Max",
 ]);
 
 const SIXTY_PERCENT_DOWNPAYMENT_MODELS = new Set([
@@ -61,7 +65,7 @@ const SIXTY_PERCENT_DOWNPAYMENT_MODELS = new Set([
 
 export const CreateAdmin = async (req: Request, res: Response) => {
   const checkrole = req.user?.role;
-  if (checkrole !== "Admin") {
+  if (checkrole !== "SuperAdmin") {
     return res.status(403).json({
       message: "You are not authorized to create admin",
     });
@@ -240,7 +244,7 @@ if(checkrole !== "Admin"){
         const adminUpdate = await UserModel.findByIdAndUpdate(
           adminId,
           { $addToSet: { createdUsers: UserData._id } },
-          { session, new: true }
+          { session, returnDocument: "after" }
         );
 
         if (!adminUpdate) {
@@ -350,7 +354,17 @@ export const CreateEasyBoughtItem = async (req: Request, res: Response) => {
    
    
 
-    const { IphoneModel, ItemName, Plan, PhonePrice, TotalPrice, monthlyPlan, weeklyPlan, UserEmail } = req.body;
+    const {
+      IphoneModel,
+      ItemName,
+      Plan,
+      PhonePrice,
+      TotalPrice,
+      downPayment,
+      monthlyPlan,
+      weeklyPlan,
+      UserEmail,
+    } = req.body;
     const resolvedIphoneModel = String(IphoneModel || ItemName || "").trim();
     const resolvedUserEmail = String(UserEmail || req.user?.email || "").trim();
     if (
@@ -409,8 +423,32 @@ export const CreateEasyBoughtItem = async (req: Request, res: Response) => {
     }
 
     const downPaymentMultiplier = SIXTY_PERCENT_DOWNPAYMENT_MODELS.has(resolvedIphoneModel) ? 0.6 : 0.4;
-    const downPayment = phonePriceNumber * downPaymentMultiplier;
-    const loanedAmount = phonePriceNumber - downPayment;
+    const minimumDownPayment = phonePriceNumber * downPaymentMultiplier;
+    const requestedDownPayment =
+      downPayment === undefined || downPayment === null || downPayment === ""
+        ? minimumDownPayment
+        : Number(downPayment);
+
+    if (!Number.isFinite(requestedDownPayment) || requestedDownPayment <= 0) {
+      return res.status(400).json({
+        message: "downPayment must be greater than zero",
+      });
+    }
+
+    if (requestedDownPayment < minimumDownPayment) {
+      return res.status(400).json({
+        message: `downPayment must be at least ${minimumDownPayment.toFixed(2)} for ${resolvedIphoneModel}`,
+      });
+    }
+
+    if (requestedDownPayment > phonePriceNumber) {
+      return res.status(400).json({
+        message: "downPayment cannot be greater than PhonePrice",
+      });
+    }
+
+    const normalizedDownPayment = Number(requestedDownPayment.toFixed(2));
+    const loanedAmount = Number(Math.max(phonePriceNumber - normalizedDownPayment, 0).toFixed(2));
     
     const CheckUserInEaseBought=await EasyBoughtItemModel.findOne({UserEmail:UserEmail});
     if(CheckUserInEaseBought){
@@ -423,7 +461,7 @@ export const CreateEasyBoughtItem = async (req: Request, res: Response) => {
       IphoneModel: resolvedIphoneModel,
       IphoneImageUrl: IPHONE_IMAGE_URLS[resolvedIphoneModel],
       Plan: resolvedPlan,
-      downPayment,
+      downPayment: normalizedDownPayment,
       loanedAmount,
       PhonePrice: phonePriceNumber,
       UserEmail: resolvedUserEmail,
