@@ -2,7 +2,10 @@ import UserModel from "../Model/UserModel.js";
 import {type Response, type Request} from "express";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
+import { randomUUID } from "crypto";
 import EasyBoughtItemModel from "../Model/EasyBoughtitem.js";
+import mongoose from "mongoose";
+import SessionModel from "../Model/SessionModel.js";
 
 const IPHONE_IMAGE_URLS: Record<string, string> = {
   "iPhone XR": "https://fdn2.gsmarena.com/vv/bigpic/apple-iphone-xr-new.jpg",
@@ -109,59 +112,6 @@ export const CreateAdmin = async (req: Request, res: Response) => {
     });
   }
 };
-
-// export const LoginAdmin = async (
-//   req: Request,
-//   res: Response
-// ): Promise<Response> => {
-//   try {
-//     const { email, password } = req.body;
-//     const checkEmail = await UserModel.findOne({ Email: email }).lean();
-
-//     if (checkEmail) {
-//       const CheckPassword = await bcrypt.compare(password, checkEmail.password);
-
-//       if (CheckPassword) {
-//         if (checkEmail) {
-//           const token = jwt.sign(
-//             {
-//               _id: checkEmail?._id,
-//               userName: checkEmail.firstName + " " + checkEmail.lastName,
-//               role: checkEmail.role,
-//             },
-//             "variationofeventsisatrandom",
-//             { expiresIn: "40m" }
-//           );
-//           //  console.log("Melasi", token);
-//           // const { password, ...info } = checkEmail._doc;
-//           res.cookie("sessionId", token);
-//           // console.log(req.headers["cookie"]);
-
-//           return res.status(201).json({
-//             success: 1,
-//             message: "login successful",
-//             data:token ,
-//           });
-//         }
-//         return res.status(404).json({
-//           message: "Access denied",
-//         });
-//       } else {
-//         return res.status(404).json({
-//           message: "Password is incorrect",
-//         });
-//       }
-//     } else {
-//       return res.status(404).json({
-//         message: "user does not exist",
-//       });
-//     }
-//   } catch (error: any) {
-//     return res.status(404).json({
-//       message: `unable to login because ${error}`,
-//     });
-//   } 
-// };
 export const LoginUser = async (
   req: Request,
   res: Response
@@ -175,16 +125,32 @@ export const LoginUser = async (
 
       if (CheckPassword) {
         if (checkEmail) {
+          const jti = randomUUID();
           const token = jwt.sign(
             {
               _id: checkEmail?._id,
               userName: checkEmail.fullName,
               role: checkEmail.role,
               email: checkEmail.email,
+              jti,
             },
             "variationofeventsisatrandom",
             { expiresIn: "40m" }
           );
+          const decodedToken = jwt.decode(token) as jwt.JwtPayload | null;
+          const expiresAt = decodedToken?.exp
+            ? new Date(decodedToken.exp * 1000)
+            : new Date(Date.now() + 40 * 60 * 1000);
+
+          await SessionModel.create({
+            user: checkEmail._id,
+            role: checkEmail.role,
+            jti,
+            active: true,
+            loginAt: new Date(),
+            lastSeenAt: new Date(),
+            expiresAt,
+          });
           //  console.log("Melasi", token);
           // const { password, ...info } = checkEmail._doc;
           res.cookie("sessionId", token);
@@ -242,14 +208,48 @@ if(checkrole !== "Admin"){
       });
     }
 
+    const adminId = req.user?._id;
+    if (!adminId) {
+      return res.status(401).json({
+        message: "Access denied",
+      });
+    }
+
     const salt = await bcrypt.genSalt(10);
     const HashedPassword = await bcrypt.hash(Password, salt);
-    const UserData = await UserModel.create({
-      fullName: normalizedFullName,
-      email: email,
-      password: HashedPassword,
-      role: "User",
-    });
+
+    const session = await mongoose.startSession();
+    let UserData: any;
+
+    try {
+      await session.withTransaction(async () => {
+        const createdUsers = await UserModel.create(
+          [
+            {
+              fullName: normalizedFullName,
+              email: email,
+              password: HashedPassword,
+              role: "User",
+              createdByAdmin: new mongoose.Types.ObjectId(adminId),
+            },
+          ],
+          { session }
+        );
+        UserData = createdUsers[0];
+
+        const adminUpdate = await UserModel.findByIdAndUpdate(
+          adminId,
+          { $addToSet: { createdUsers: UserData._id } },
+          { session, new: true }
+        );
+
+        if (!adminUpdate) {
+          throw new Error("Admin account not found");
+        }
+      });
+    } finally {
+      await session.endSession();
+    }
 
  return res.status(200).json({
       message: "registration was successful",
@@ -454,6 +454,23 @@ export const CreateEasyBoughtItem = async (req: Request, res: Response) => {
 
 
     try {
+      const userId = req.user?._id;
+      const userSessionJti = req.user?.jti;
+
+      if (userId) {
+        const filter = userSessionJti
+          ? { user: userId, jti: userSessionJti, active: true }
+          : { user: userId, active: true };
+
+        await SessionModel.updateMany(filter, {
+          $set: {
+            active: false,
+            logoutAt: new Date(),
+            lastSeenAt: new Date(),
+          },
+        });
+      }
+
       res.clearCookie("sessionId");
       return res.status(200).json({
         message: "Logout successful",

@@ -4,6 +4,7 @@ import userRouter from "./Router/UserRouter.js";
 import dashboardRouter from "./Router/DashboardRouter.js";
 import receiptRouter from "./Router/ReceiptRouter.js";
 import profileRouter from "./Router/Profilerouter.js";
+import superAdminRouter from "./Router/SuperAdminRouter.js";
 
 
 export const MainApp = (app: Application) => {
@@ -18,6 +19,7 @@ export const MainApp = (app: Application) => {
  app.use("/api/v1/receipt", receiptRouter);
  app.use("/api", dashboardRouter);
  app.use("/api/v1/profile", profileRouter);
+ app.use("/api/v1/superadmin", superAdminRouter);
   
 
 

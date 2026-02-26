@@ -7,7 +7,7 @@ interface EasyBuyPlan {
   endDate?: Date;
 }
 
-interface IEasyBuyPlan extends EasyBuyPlan, mongoose.Document {}
+export interface IEasyBuyPlan extends EasyBuyPlan, mongoose.Document {}
 
 const EasyBuyPlanSchema = new mongoose.Schema(
   {

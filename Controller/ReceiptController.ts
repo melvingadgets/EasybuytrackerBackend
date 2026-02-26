@@ -3,8 +3,13 @@ import fs from "fs/promises";
 import ReceiptModel from "../Model/ReceiptModel.js";
 import cloudinary from "../Utils/cloudinary.js";
 import EasyBoughtItemModel from "../Model/EasyBoughtitem.js";
+import AuditLogModel from "../Model/AuditLogModel.js";
 
 const toNumber = (value: unknown): number => Number(value);
+const normalizeReason = (value: unknown): string => {
+  const trimmed = String(value ?? "").trim();
+  return trimmed || "No reason provided";
+};
 
 const isValidReceiptMimeType = (mimeType: string) => {
   return mimeType.startsWith("image/") || mimeType === "application/pdf";
@@ -147,6 +152,8 @@ export const GetPendingReceipts = async (_req: Request, res: Response) => {
 
 export const ApproveReceiptPayment = async (req: Request, res: Response) => {
   try {
+    const actorId = req.user?._id;
+    const actorRole = req.user?.role;
     const { receiptId } = req.params;
     if (!receiptId) {
       return res.status(400).json({ message: "receiptId is required" });
@@ -164,6 +171,23 @@ export const ApproveReceiptPayment = async (req: Request, res: Response) => {
     receipt.status = "approved";
     receipt.approvedAt = new Date();
     await receipt.save();
+    const reason = normalizeReason(req.body?.reason);
+
+    if (actorId && (actorRole === "Admin" || actorRole === "SuperAdmin")) {
+      await AuditLogModel.create({
+        actor: actorId,
+        actorRole,
+        action: "RECEIPT_APPROVE",
+        targetType: "receipt",
+        targetId: receipt._id,
+        reason,
+        metadata: {
+          receiptAmount: receipt.amount,
+          receiptPlan: receipt.plan,
+          receiptOwner: receipt.user,
+        },
+      });
+    }
 
     return res.status(200).json({
       message: "Payment approved successfully",

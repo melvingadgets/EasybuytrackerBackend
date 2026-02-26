@@ -3,7 +3,9 @@ interface user {
   fullName: string;
   email: string;
   password: string;
-  role: "User" | "Admin";
+  role: "User" | "Admin" | "SuperAdmin";
+  createdUsers: mongoose.Types.ObjectId[];
+  createdByAdmin: mongoose.Types.ObjectId | null;
 }
 
 interface Iuser extends user, mongoose.Document {}
@@ -29,8 +31,20 @@ const UserSchema = new mongoose.Schema(
     },
     role: {
       type: String,
-      enum: ["User", "Admin"],
+      enum: ["User", "Admin", "SuperAdmin"],
       default: "User",
+    },
+    createdUsers: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "user",
+      },
+    ],
+    createdByAdmin: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "user",
+      default: null,
+      index: true,
     },
   },
   { timestamps: true }

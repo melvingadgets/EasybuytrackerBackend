@@ -13,6 +13,6 @@ const router = express.Router();
 router.post("/upload", verifyToken, requireRole(["User", "Admin"]), upload, UploadReceipt);
 router.get("/my", verifyToken, requireRole(["User", "Admin"]), GetMyReceipts);
 router.get("/pending", verifyToken, requireRole(["Admin"]), GetPendingReceipts);
-router.patch("/:receiptId/approve", verifyToken, requireRole(["Admin"]), ApproveReceiptPayment);
+router.patch("/:receiptId/approve", verifyToken, requireRole(["Admin", "SuperAdmin"]), ApproveReceiptPayment);
 
 export default router;
