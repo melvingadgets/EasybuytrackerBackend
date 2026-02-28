@@ -109,6 +109,85 @@ const getMonthlyMarkupMultiplier = (months: number) => {
   return 1;
 };
 
+const getDueCyclesElapsed = (args: {
+  createdAt: Date;
+  intervalDays: number;
+  maxCycles: number;
+  now?: Date;
+}) => {
+  const { createdAt, intervalDays, maxCycles, now = new Date() } = args;
+  if (maxCycles <= 0) return 0;
+
+  const firstDueDate = addDays(createdAt, intervalDays);
+  if (now < firstDueDate) return 0;
+
+  const intervalMs = intervalDays * 24 * 60 * 60 * 1000;
+  const elapsedMs = now.getTime() - firstDueDate.getTime();
+  const elapsedCycles = Math.floor(elapsedMs / intervalMs) + 1;
+  return Math.max(0, Math.min(elapsedCycles, maxCycles));
+};
+
+const getUnresolvedDueAmount = async (userId: string) => {
+  const [items, approvedReceipts] = await Promise.all([
+    EasyBoughtItemModel.find({ UserId: new mongoose.Types.ObjectId(userId) })
+      .select({ Plan: 1, weeklyPlan: 1, monthlyPlan: 1, loanedAmount: 1, PhonePrice: 1, TotalPrice: 1, downPayment: 1, createdAt: 1 })
+      .lean(),
+    ReceiptModel.find({
+      user: new mongoose.Types.ObjectId(userId),
+      status: "approved",
+    })
+      .select({ amount: 1 })
+      .lean(),
+  ]);
+
+  const now = new Date();
+  let scheduledDueToDate = 0;
+
+  for (const item of items as any[]) {
+    const loanedAmount = getItemLoanedAmount(item);
+
+    if (item.Plan === "Monthly") {
+      const months = Number(item.monthlyPlan || 0);
+      if (months <= 0) continue;
+      const installmentAmount = (loanedAmount * getMonthlyMarkupMultiplier(months)) / months;
+      const createdAt = item.createdAt ? new Date(item.createdAt) : (item._id as mongoose.Types.ObjectId).getTimestamp();
+      const dueCycles = getDueCyclesElapsed({
+        createdAt,
+        intervalDays: 30,
+        maxCycles: months,
+        now,
+      });
+      scheduledDueToDate += installmentAmount * dueCycles;
+      continue;
+    }
+
+    const weeks = Number(item.weeklyPlan || 0);
+    if (weeks <= 0) continue;
+    const installmentAmount = (loanedAmount * getWeeklyMarkupMultiplier(weeks)) / weeks;
+    const createdAt = item.createdAt ? new Date(item.createdAt) : (item._id as mongoose.Types.ObjectId).getTimestamp();
+    const dueCycles = getDueCyclesElapsed({
+      createdAt,
+      intervalDays: 7,
+      maxCycles: weeks,
+      now,
+    });
+    scheduledDueToDate += installmentAmount * dueCycles;
+  }
+
+  const approvedReceiptTotal = approvedReceipts.reduce(
+    (sum, receipt: any) => sum + Math.max(Number(receipt.amount || 0), 0),
+    0
+  );
+
+  const unresolvedDue = Math.max(scheduledDueToDate - approvedReceiptTotal, 0);
+
+  return {
+    scheduledDueToDate: Number(scheduledDueToDate.toFixed(2)),
+    approvedReceiptTotal: Number(approvedReceiptTotal.toFixed(2)),
+    owedAmount: Number(unresolvedDue.toFixed(2)),
+  };
+};
+
 const getEasyBoughtItemsNextPaymentAmount = async (
   userId: string,
   duePlan?: "Monthly" | "Weekly" | null
@@ -401,6 +480,10 @@ export const GetDashboard = async (req: Request, res: Response) => {
       .select({ manualNextDueDate: 1 })
       .lean();
     const easyBoughtItemTotals = await getEasyBoughtItemTotals(userId.toString());
+    const unresolvedDueMeta = await getUnresolvedDueAmount(userId.toString());
+    const owedAmount = Number(
+      Math.min(unresolvedDueMeta.owedAmount, easyBoughtItemTotals.remainingBalance).toFixed(2)
+    );
     const easyBoughtItemsDueMeta = await getEasyBoughtItemsNextDueDate(userId.toString());
     const resolvedDueDate = dueDateOverrideUser?.manualNextDueDate
       ? new Date(dueDateOverrideUser.manualNextDueDate)
@@ -436,6 +519,7 @@ export const GetDashboard = async (req: Request, res: Response) => {
         totalAmount: easyBoughtItemTotals.totalAmount,
         totalPaid: easyBoughtItemTotals.totalPaid,
         remainingBalance: easyBoughtItemTotals.remainingBalance,
+        owedAmount,
         progress: 0,
         nextPaymentDue: adjustedDue.nextPaymentDue,
         nextPaymentAmount: adjustedDue.nextPaymentAmount,
@@ -454,6 +538,7 @@ export const GetDashboard = async (req: Request, res: Response) => {
       totalAmount: easyBoughtItemTotals.totalAmount,
       totalPaid: easyBoughtItemTotals.totalPaid,
       remainingBalance: easyBoughtItemTotals.remainingBalance,
+      owedAmount,
       nextPaymentDue: adjustedDue.nextPaymentDue,
       nextPaymentAmount: adjustedDue.nextPaymentAmount,
       planStatus: resolvedPlanStatus,
