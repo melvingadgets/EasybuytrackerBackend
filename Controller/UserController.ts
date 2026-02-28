@@ -464,6 +464,7 @@ export const CreateEasyBoughtItem = async (req: Request, res: Response) => {
       downPayment: normalizedDownPayment,
       loanedAmount,
       PhonePrice: phonePriceNumber,
+      billingAnchorDate: new Date(),
       UserEmail: resolvedUserEmail,
       UserId:getUser._id,
     };
