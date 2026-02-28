@@ -443,6 +443,133 @@ export const SuperAdminUpdateUserNextDueDate = async (req: Request, res: Respons
   }
 };
 
+export const SuperAdminPreviewItemCreatedDate = async (req: Request, res: Response) => {
+  try {
+    const { itemId } = req.params;
+    if (!itemId || !mongoose.isValidObjectId(itemId)) {
+      return res.status(400).json({ message: "A valid itemId is required" });
+    }
+
+    const item = await EasyBoughtItemModel.findById(itemId)
+      .select({ _id: 1, UserId: 1, UserEmail: 1, IphoneModel: 1, Plan: 1, createdAt: 1 })
+      .lean();
+    if (!item) {
+      return res.status(404).json({ message: "Item not found" });
+    }
+
+    let proposedCreatedAt: Date | null = null;
+    if (req.query?.createdAt !== undefined) {
+      try {
+        proposedCreatedAt = parseDateInput(req.query.createdAt, "createdAt");
+      } catch (error: any) {
+        return res.status(400).json({
+          message: error?.message || "Invalid createdAt value",
+        });
+      }
+    }
+
+    return res.status(200).json({
+      message: "Item created date preview retrieved",
+      data: {
+        itemId: item._id,
+        currentCreatedAt: item.createdAt ?? null,
+        proposedCreatedAt,
+        userId: item.UserId,
+        userEmail: item.UserEmail,
+        iphoneModel: item.IphoneModel,
+        plan: item.Plan,
+      },
+    });
+  } catch (error: any) {
+    return res.status(400).json({
+      message: "Failed to preview item created date",
+      reason: error?.message || "Unknown error",
+    });
+  }
+};
+
+export const SuperAdminUpdateItemCreatedDate = async (req: Request, res: Response) => {
+  const actorId = req.user?._id;
+  const actorRole = req.user?.role;
+  const { itemId } = req.params;
+
+  if (!actorId || actorRole !== "SuperAdmin") {
+    return res.status(401).json({ message: "Access denied" });
+  }
+
+  if (!itemId || !mongoose.isValidObjectId(itemId)) {
+    return res.status(400).json({ message: "A valid itemId is required" });
+  }
+
+  let createdAt: Date;
+  try {
+    createdAt = parseDateInput(req.body?.createdAt, "createdAt");
+  } catch (error: any) {
+    return res.status(400).json({
+      message: error?.message || "Invalid createdAt value",
+    });
+  }
+
+  const reason = normalizeReason(req.body?.reason);
+
+  try {
+    const existingItem = await EasyBoughtItemModel.findById(itemId)
+      .select({ _id: 1, UserId: 1, UserEmail: 1, IphoneModel: 1, Plan: 1, createdAt: 1 })
+      .lean();
+    if (!existingItem) {
+      return res.status(404).json({ message: "Item not found" });
+    }
+
+    const updatedItem = await EasyBoughtItemModel.findOneAndUpdate(
+      { _id: itemId },
+      { $set: { createdAt } },
+      {
+        returnDocument: "after",
+        runValidators: true,
+        overwriteImmutable: true,
+      }
+    )
+      .select({ _id: 1, UserId: 1, UserEmail: 1, IphoneModel: 1, Plan: 1, createdAt: 1, updatedAt: 1 })
+      .lean();
+
+    if (!updatedItem) {
+      return res.status(404).json({ message: "Item not found" });
+    }
+
+    await AuditLogModel.create({
+      actor: new mongoose.Types.ObjectId(actorId),
+      actorRole,
+      action: "ITEM_CREATED_DATE_UPDATE",
+      targetType: "easyboughtitem",
+      targetId: new mongoose.Types.ObjectId(String(updatedItem._id)),
+      reason,
+      metadata: {
+        itemUserId: existingItem.UserId,
+        itemUserEmail: existingItem.UserEmail,
+        itemModel: existingItem.IphoneModel,
+        itemPlan: existingItem.Plan,
+        previousCreatedAt: existingItem.createdAt ?? null,
+        updatedCreatedAt: updatedItem.createdAt ?? null,
+      },
+    });
+
+    return res.status(200).json({
+      message: "Item created date updated successfully",
+      data: {
+        itemId: updatedItem._id,
+        previousCreatedAt: existingItem.createdAt ?? null,
+        updatedCreatedAt: updatedItem.createdAt ?? null,
+        updatedAt: updatedItem.updatedAt ?? null,
+      },
+    });
+  } catch (error: any) {
+    return res.status(400).json({
+      message: "Failed to update item created date",
+      reason: error?.message || "Unknown error",
+    });
+  }
+};
+
 export const SuperAdminGetLoginStats = async (_req: Request, res: Response) => {
   try {
     const now = new Date();

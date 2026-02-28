@@ -5,8 +5,9 @@ type AuditAction =
   | "USER_DELETE"
   | "RECEIPT_APPROVE"
   | "RECEIPT_UPLOAD_DATE_UPDATE"
-  | "USER_NEXT_DUE_DATE_UPDATE";
-type AuditTargetType = "user" | "receipt";
+  | "USER_NEXT_DUE_DATE_UPDATE"
+  | "ITEM_CREATED_DATE_UPDATE";
+type AuditTargetType = "user" | "receipt" | "easyboughtitem";
 
 interface AuditLog {
   actor: mongoose.Types.ObjectId;
@@ -41,13 +42,14 @@ const AuditLogSchema = new mongoose.Schema(
         "RECEIPT_APPROVE",
         "RECEIPT_UPLOAD_DATE_UPDATE",
         "USER_NEXT_DUE_DATE_UPDATE",
+        "ITEM_CREATED_DATE_UPDATE",
       ],
       required: true,
       index: true,
     },
     targetType: {
       type: String,
-      enum: ["user", "receipt"],
+      enum: ["user", "receipt", "easyboughtitem"],
       required: true,
       index: true,
     },

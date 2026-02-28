@@ -4,8 +4,10 @@ import {
   SuperAdminDeleteUserOrAdmin,
   SuperAdminGetAllUsers,
   SuperAdminGetLoginStats,
+  SuperAdminPreviewItemCreatedDate,
   SuperAdminPreviewReceiptUploadedDate,
   SuperAdminPreviewUserNextDueDate,
+  SuperAdminUpdateItemCreatedDate,
   SuperAdminUpdateReceiptUploadedDate,
   SuperAdminUpdateUserNextDueDate,
   SuperAdminGetUsersWithEasyBoughtItems,
@@ -50,6 +52,18 @@ router.patch(
   verifyToken,
   requireRole(["SuperAdmin"]),
   SuperAdminUpdateUserNextDueDate
+);
+router.get(
+  "/maintenance/items/:itemId/created-date/preview",
+  verifyToken,
+  requireRole(["SuperAdmin"]),
+  SuperAdminPreviewItemCreatedDate
+);
+router.patch(
+  "/maintenance/items/:itemId/created-date",
+  verifyToken,
+  requireRole(["SuperAdmin"]),
+  SuperAdminUpdateItemCreatedDate
 );
 
 export default router;
