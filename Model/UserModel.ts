@@ -6,6 +6,9 @@ interface user {
   role: "User" | "Admin" | "SuperAdmin";
   createdUsers: mongoose.Types.ObjectId[];
   createdByAdmin: mongoose.Types.ObjectId | null;
+  manualNextDueDate?: Date | null;
+  createdAt?: Date;
+  updatedAt?: Date;
 }
 
 interface Iuser extends user, mongoose.Document {}
@@ -43,6 +46,11 @@ const UserSchema = new mongoose.Schema(
     createdByAdmin: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "user",
+      default: null,
+      index: true,
+    },
+    manualNextDueDate: {
+      type: Date,
       default: null,
       index: true,
     },

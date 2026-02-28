@@ -4,6 +4,10 @@ import {
   SuperAdminDeleteUserOrAdmin,
   SuperAdminGetAllUsers,
   SuperAdminGetLoginStats,
+  SuperAdminPreviewReceiptUploadedDate,
+  SuperAdminPreviewUserNextDueDate,
+  SuperAdminUpdateReceiptUploadedDate,
+  SuperAdminUpdateUserNextDueDate,
   SuperAdminGetUsersWithEasyBoughtItems,
 } from "../Controller/SuperAdminController.js";
 
@@ -23,5 +27,29 @@ router.delete(
   SuperAdminDeleteUserOrAdmin
 );
 router.get("/login-stats", verifyToken, requireRole(["SuperAdmin"]), SuperAdminGetLoginStats);
+router.get(
+  "/maintenance/receipts/:receiptId/uploaded-date/preview",
+  verifyToken,
+  requireRole(["SuperAdmin"]),
+  SuperAdminPreviewReceiptUploadedDate
+);
+router.patch(
+  "/maintenance/receipts/:receiptId/uploaded-date",
+  verifyToken,
+  requireRole(["SuperAdmin"]),
+  SuperAdminUpdateReceiptUploadedDate
+);
+router.get(
+  "/maintenance/users/:userId/next-due-date/preview",
+  verifyToken,
+  requireRole(["SuperAdmin"]),
+  SuperAdminPreviewUserNextDueDate
+);
+router.patch(
+  "/maintenance/users/:userId/next-due-date",
+  verifyToken,
+  requireRole(["SuperAdmin"]),
+  SuperAdminUpdateUserNextDueDate
+);
 
 export default router;

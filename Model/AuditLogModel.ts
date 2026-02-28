@@ -1,7 +1,11 @@
 import mongoose from "mongoose";
 
 type AuditActorRole = "Admin" | "SuperAdmin";
-type AuditAction = "USER_DELETE" | "RECEIPT_APPROVE";
+type AuditAction =
+  | "USER_DELETE"
+  | "RECEIPT_APPROVE"
+  | "RECEIPT_UPLOAD_DATE_UPDATE"
+  | "USER_NEXT_DUE_DATE_UPDATE";
 type AuditTargetType = "user" | "receipt";
 
 interface AuditLog {
@@ -32,7 +36,12 @@ const AuditLogSchema = new mongoose.Schema(
     },
     action: {
       type: String,
-      enum: ["USER_DELETE", "RECEIPT_APPROVE"],
+      enum: [
+        "USER_DELETE",
+        "RECEIPT_APPROVE",
+        "RECEIPT_UPLOAD_DATE_UPDATE",
+        "USER_NEXT_DUE_DATE_UPDATE",
+      ],
       required: true,
       index: true,
     },

@@ -397,31 +397,37 @@ export const GetDashboard = async (req: Request, res: Response) => {
       return res.status(401).json({ message: "Access denied" });
     }
 
+    const dueDateOverrideUser = await UserModel.findById(userId)
+      .select({ manualNextDueDate: 1 })
+      .lean();
     const easyBoughtItemTotals = await getEasyBoughtItemTotals(userId.toString());
     const easyBoughtItemsDueMeta = await getEasyBoughtItemsNextDueDate(userId.toString());
+    const resolvedDueDate = dueDateOverrideUser?.manualNextDueDate
+      ? new Date(dueDateOverrideUser.manualNextDueDate)
+      : easyBoughtItemsDueMeta.dueDate;
     const easyBoughtItemsNextPaymentAmount = await getEasyBoughtItemsNextPaymentAmount(
       userId.toString(),
       easyBoughtItemsDueMeta.duePlan
     );
     const receiptHistory = await getRecentApprovedReceiptPayments(userId.toString());
     const currentCycleReceiptAmount =
-      easyBoughtItemsDueMeta.dueDate && easyBoughtItemsDueMeta.duePlan
+      resolvedDueDate && easyBoughtItemsDueMeta.duePlan
         ? await getApprovedReceiptAmountForCurrentCycle({
             userId: userId.toString(),
             duePlan: easyBoughtItemsDueMeta.duePlan,
-            nextDueDate: easyBoughtItemsDueMeta.dueDate,
+            nextDueDate: resolvedDueDate,
           })
         : 0;
 
     const adjustedDue =
-      easyBoughtItemsDueMeta.duePlan && easyBoughtItemsDueMeta.dueDate
+      easyBoughtItemsDueMeta.duePlan && resolvedDueDate
       ? applyReceiptAdjustmentToDue({
           nextPaymentAmount: easyBoughtItemsNextPaymentAmount,
-          nextPaymentDue: easyBoughtItemsDueMeta.dueDate,
+          nextPaymentDue: resolvedDueDate,
           receiptAmount: currentCycleReceiptAmount,
           duePlan: easyBoughtItemsDueMeta.duePlan,
         })
-      : { nextPaymentAmount: easyBoughtItemsNextPaymentAmount, nextPaymentDue: easyBoughtItemsDueMeta.dueDate };
+      : { nextPaymentAmount: easyBoughtItemsNextPaymentAmount, nextPaymentDue: resolvedDueDate };
 
     const resolvedPlanStatus = adjustedDue.nextPaymentAmount !== 0 ? "active" : "completed";
     const dashboard = await getDashboardMetrics(userId.toString());
@@ -435,6 +441,7 @@ export const GetDashboard = async (req: Request, res: Response) => {
         nextPaymentAmount: adjustedDue.nextPaymentAmount,
         planStatus: resolvedPlanStatus,
         recentPayments: receiptHistory,
+        manualNextDueDate: dueDateOverrideUser?.manualNextDueDate ?? null,
       });
     }
 
@@ -451,6 +458,7 @@ export const GetDashboard = async (req: Request, res: Response) => {
       nextPaymentAmount: adjustedDue.nextPaymentAmount,
       planStatus: resolvedPlanStatus,
       recentPayments: mergedRecentPayments,
+      manualNextDueDate: dueDateOverrideUser?.manualNextDueDate ?? null,
     });
   } catch (error: any) {
     return res.status(400).json({
