@@ -95,20 +95,6 @@ const getItemLoanedAmount = (item: {
   return Math.max(phonePrice - downPayment, 0);
 };
 
-const resolveItemAnchorDate = (item: {
-  billingAnchorDate?: Date | null;
-  createdAt?: Date | null;
-  _id: mongoose.Types.ObjectId;
-}) => {
-  if (item.billingAnchorDate) {
-    return new Date(item.billingAnchorDate);
-  }
-  if (item.createdAt) {
-    return new Date(item.createdAt);
-  }
-  return item._id.getTimestamp();
-};
-
 const getWeeklyMarkupMultiplier = (weeks: number) => {
   if (weeks === 4) return 1.2;
   if (weeks === 8) return 1.4;
@@ -144,17 +130,7 @@ const getDueCyclesElapsed = (args: {
 const getUnresolvedDueAmount = async (userId: string) => {
   const [items, approvedReceipts] = await Promise.all([
     EasyBoughtItemModel.find({ UserId: new mongoose.Types.ObjectId(userId) })
-      .select({
-        Plan: 1,
-        weeklyPlan: 1,
-        monthlyPlan: 1,
-        loanedAmount: 1,
-        PhonePrice: 1,
-        TotalPrice: 1,
-        downPayment: 1,
-        billingAnchorDate: 1,
-        createdAt: 1,
-      })
+      .select({ Plan: 1, weeklyPlan: 1, monthlyPlan: 1, loanedAmount: 1, PhonePrice: 1, TotalPrice: 1, downPayment: 1, createdAt: 1 })
       .lean(),
     ReceiptModel.find({
       user: new mongoose.Types.ObjectId(userId),
@@ -174,7 +150,7 @@ const getUnresolvedDueAmount = async (userId: string) => {
       const months = Number(item.monthlyPlan || 0);
       if (months <= 0) continue;
       const installmentAmount = (loanedAmount * getMonthlyMarkupMultiplier(months)) / months;
-      const createdAt = resolveItemAnchorDate(item as any);
+      const createdAt = item.createdAt ? new Date(item.createdAt) : (item._id as mongoose.Types.ObjectId).getTimestamp();
       const dueCycles = getDueCyclesElapsed({
         createdAt,
         intervalDays: 30,
@@ -188,7 +164,7 @@ const getUnresolvedDueAmount = async (userId: string) => {
     const weeks = Number(item.weeklyPlan || 0);
     if (weeks <= 0) continue;
     const installmentAmount = (loanedAmount * getWeeklyMarkupMultiplier(weeks)) / weeks;
-    const createdAt = resolveItemAnchorDate(item as any);
+    const createdAt = item.createdAt ? new Date(item.createdAt) : (item._id as mongoose.Types.ObjectId).getTimestamp();
     const dueCycles = getDueCyclesElapsed({
       createdAt,
       intervalDays: 7,
@@ -247,7 +223,7 @@ const getEasyBoughtItemsNextDueDate = async (
   userId: string
 ): Promise<{ dueDate: Date | null; duePlan: "Monthly" | "Weekly" | null }> => {
   const items = await EasyBoughtItemModel.find({ UserId: new mongoose.Types.ObjectId(userId) })
-    .select({ Plan: 1, billingAnchorDate: 1, createdAt: 1 })
+    .select({ Plan: 1, createdAt: 1 })
     .lean();
 
   if (!items.length) return { dueDate: null, duePlan: null };
@@ -256,7 +232,8 @@ const getEasyBoughtItemsNextDueDate = async (
   let nearestPlan: "Monthly" | "Weekly" | null = null;
 
   for (const item of items) {
-    const createdAt = resolveItemAnchorDate(item as any);
+    const fallbackCreatedAt = (item._id as mongoose.Types.ObjectId).getTimestamp();
+    const createdAt = item.createdAt ? new Date(item.createdAt) : fallbackCreatedAt;
     const intervalDays = item.Plan === "Monthly" ? 30 : 7;
     const firstDueDate = addDays(createdAt, intervalDays);
     const nextDueDate = getNextRecurringDueDate(firstDueDate, intervalDays);

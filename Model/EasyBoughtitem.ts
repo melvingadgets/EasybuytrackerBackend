@@ -10,7 +10,6 @@ interface easyboughtitem {
     PhonePrice: number;
     weeklyPlan?: number;
     monthlyPlan?: number;
-   billingAnchorDate?: Date;
    UserId: mongoose.Types.ObjectId;
    UserEmail:string; 
    createdAt?: Date;
@@ -29,7 +28,6 @@ const EasyBoughtItemSchema = new mongoose.Schema({
   PhonePrice: { type: Number, required: true },
   monthlyPlan:{type:Number, enum:[1,2,3]},
   weeklyPlan:{type:Number, enum:[4,8,12],},
-  billingAnchorDate: { type: Date, default: null, index: true },
   UserId:{type:mongoose.Types.ObjectId,ref:"User",required:true},
   UserEmail:{type:String,required:true}
 }, { timestamps: true })      

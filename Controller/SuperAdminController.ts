@@ -27,56 +27,6 @@ const parseDateInput = (value: unknown, fieldName: string): Date => {
   return parsed;
 };
 
-const addDays = (date: Date, days: number) => {
-  const next = new Date(date);
-  next.setDate(next.getDate() + days);
-  return next;
-};
-
-const getNextRecurringDueDate = (startDate: Date, intervalDays: number, now = new Date()) => {
-  if (startDate > now) return startDate;
-
-  const intervalMs = intervalDays * 24 * 60 * 60 * 1000;
-  const elapsedMs = now.getTime() - startDate.getTime();
-  const periodsElapsed = Math.floor(elapsedMs / intervalMs) + 1;
-  return new Date(startDate.getTime() + periodsElapsed * intervalMs);
-};
-
-const resolveItemAnchorDate = (item: {
-  billingAnchorDate?: Date | null;
-  createdAt?: Date | null;
-  _id: mongoose.Types.ObjectId;
-}) => {
-  if (item.billingAnchorDate) {
-    return new Date(item.billingAnchorDate);
-  }
-  if (item.createdAt) {
-    return new Date(item.createdAt);
-  }
-  return item._id.getTimestamp();
-};
-
-const getUserComputedNextDueDate = async (userId: string): Promise<Date | null> => {
-  const items = await EasyBoughtItemModel.find({ UserId: new mongoose.Types.ObjectId(userId) })
-    .select({ Plan: 1, billingAnchorDate: 1, createdAt: 1 })
-    .lean();
-
-  if (!items.length) return null;
-
-  let nearestDue: Date | null = null;
-  for (const item of items as any[]) {
-    const anchorDate = resolveItemAnchorDate(item);
-    const intervalDays = item.Plan === "Monthly" ? 30 : 7;
-    const firstDueDate = addDays(anchorDate, intervalDays);
-    const nextDueDate = getNextRecurringDueDate(firstDueDate, intervalDays);
-    if (!nearestDue || nextDueDate < nearestDue) {
-      nearestDue = nextDueDate;
-    }
-  }
-
-  return nearestDue;
-};
-
 export const SuperAdminGetAllUsers = async (_req: Request, res: Response) => {
   try {
     const users = await UserModel.find()
@@ -387,7 +337,6 @@ export const SuperAdminPreviewUserNextDueDate = async (req: Request, res: Respon
     if (!user) {
       return res.status(404).json({ message: "User not found" });
     }
-    const currentComputedNextDueDate = await getUserComputedNextDueDate(String(user._id));
 
     let proposedNextDueDate: Date | null = null;
     if (req.query?.nextDueDate !== undefined) {
@@ -406,9 +355,8 @@ export const SuperAdminPreviewUserNextDueDate = async (req: Request, res: Respon
         userId: user._id,
         fullName: user.fullName,
         email: user.email,
-        currentNextDueDate: currentComputedNextDueDate,
+        currentNextDueDate: user.manualNextDueDate ?? null,
         proposedNextDueDate,
-        computedFromScheduleAnchor: true,
       },
     });
   } catch (error: any) {
@@ -423,13 +371,12 @@ export const SuperAdminUpdateUserNextDueDate = async (req: Request, res: Respons
   const actorId = req.user?._id;
   const actorRole = req.user?.role;
   const { userId } = req.params;
-  const normalizedUserId = String(userId ?? "");
 
   if (!actorId || actorRole !== "SuperAdmin") {
     return res.status(401).json({ message: "Access denied" });
   }
 
-  if (!normalizedUserId || !mongoose.isValidObjectId(normalizedUserId)) {
+  if (!userId || !mongoose.isValidObjectId(userId)) {
     return res.status(400).json({ message: "A valid userId is required" });
   }
 
@@ -445,58 +392,24 @@ export const SuperAdminUpdateUserNextDueDate = async (req: Request, res: Respons
   const reason = normalizeReason(req.body?.reason);
 
   try {
-    const existingUser = await UserModel.findById(normalizedUserId)
+    const existingUser = await UserModel.findById(userId)
       .select({ _id: 1, fullName: 1, email: 1, manualNextDueDate: 1 })
       .lean();
     if (!existingUser) {
       return res.status(404).json({ message: "User not found" });
     }
 
-    const items = await EasyBoughtItemModel.find({ UserId: new mongoose.Types.ObjectId(normalizedUserId) })
-      .select({ _id: 1, Plan: 1, billingAnchorDate: 1, createdAt: 1 })
+    const updatedUser = await UserModel.findOneAndUpdate(
+      { _id: userId },
+      { $set: { manualNextDueDate: nextDueDate } },
+      { returnDocument: "after", runValidators: true }
+    )
+      .select({ _id: 1, fullName: 1, email: 1, manualNextDueDate: 1, updatedAt: 1 })
       .lean();
 
-    if (!items.length) {
-      return res.status(404).json({ message: "No EasyBought items found for this user" });
+    if (!updatedUser) {
+      return res.status(404).json({ message: "User not found" });
     }
-
-    const currentNextDueDate = await getUserComputedNextDueDate(String(existingUser._id));
-    if (!currentNextDueDate) {
-      return res.status(400).json({ message: "Unable to compute current next due date for user" });
-    }
-
-    const shiftMs = nextDueDate.getTime() - currentNextDueDate.getTime();
-    const updates = items.map((item: any) => ({
-      updateOne: {
-        filter: { _id: item._id },
-        update: {
-          $set: {
-            billingAnchorDate: new Date(resolveItemAnchorDate(item).getTime() + shiftMs),
-          },
-        },
-      },
-    }));
-
-    const session = await mongoose.startSession();
-    let updatedUser: any = null;
-    try {
-      await session.withTransaction(async () => {
-        if (updates.length) {
-          await EasyBoughtItemModel.bulkWrite(updates, { session });
-        }
-        updatedUser = await UserModel.findOneAndUpdate(
-          { _id: normalizedUserId },
-          { $set: { manualNextDueDate: null } },
-          { returnDocument: "after", runValidators: true, session }
-        )
-          .select({ _id: 1, fullName: 1, email: 1, manualNextDueDate: 1, updatedAt: 1 })
-          .lean();
-      });
-    } finally {
-      await session.endSession();
-    }
-
-    const recalculatedNextDueDate = await getUserComputedNextDueDate(String(existingUser._id));
 
     await AuditLogModel.create({
       actor: new mongoose.Types.ObjectId(actorId),
@@ -508,11 +421,8 @@ export const SuperAdminUpdateUserNextDueDate = async (req: Request, res: Respons
       metadata: {
         targetUserEmail: updatedUser.email,
         targetUserFullName: updatedUser.fullName,
-        previousNextDueDate: currentNextDueDate,
-        updatedNextDueDate: recalculatedNextDueDate,
-        shiftedByMs: shiftMs,
-        affectedItemsCount: items.length,
-        scheduleAnchorUpdated: true,
+        previousNextDueDate: existingUser.manualNextDueDate ?? null,
+        updatedNextDueDate: updatedUser.manualNextDueDate ?? null,
       },
     });
 
@@ -520,10 +430,9 @@ export const SuperAdminUpdateUserNextDueDate = async (req: Request, res: Respons
       message: "User next due date updated successfully",
       data: {
         userId: updatedUser._id,
-        previousNextDueDate: currentNextDueDate,
-        updatedNextDueDate: recalculatedNextDueDate,
+        previousNextDueDate: existingUser.manualNextDueDate ?? null,
+        updatedNextDueDate: updatedUser.manualNextDueDate ?? null,
         updatedAt: updatedUser.updatedAt ?? null,
-        affectedItemsCount: items.length,
       },
     });
   } catch (error: any) {
@@ -613,28 +522,14 @@ export const SuperAdminUpdateItemCreatedDate = async (req: Request, res: Respons
 
     const updatedItem = await EasyBoughtItemModel.findOneAndUpdate(
       { _id: itemId },
-      {
-        $set: {
-          createdAt,
-          billingAnchorDate: createdAt,
-        },
-      },
+      { $set: { createdAt } },
       {
         returnDocument: "after",
         runValidators: true,
         overwriteImmutable: true,
       }
     )
-      .select({
-        _id: 1,
-        UserId: 1,
-        UserEmail: 1,
-        IphoneModel: 1,
-        Plan: 1,
-        createdAt: 1,
-        billingAnchorDate: 1,
-        updatedAt: 1,
-      })
+      .select({ _id: 1, UserId: 1, UserEmail: 1, IphoneModel: 1, Plan: 1, createdAt: 1, updatedAt: 1 })
       .lean();
 
     if (!updatedItem) {
@@ -655,7 +550,6 @@ export const SuperAdminUpdateItemCreatedDate = async (req: Request, res: Respons
         itemPlan: existingItem.Plan,
         previousCreatedAt: existingItem.createdAt ?? null,
         updatedCreatedAt: updatedItem.createdAt ?? null,
-        updatedBillingAnchorDate: updatedItem.billingAnchorDate ?? null,
       },
     });
 
