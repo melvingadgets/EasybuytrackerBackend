@@ -109,6 +109,13 @@ const getMonthlyMarkupMultiplier = (months: number) => {
   return 1;
 };
 
+type NormalizedItemSchedule = {
+  nextDueDate: Date | null;
+  nextInstallmentAmount: number;
+  dueToDateAmount: number;
+  totalInstallmentAmount: number;
+};
+
 const getDueCyclesElapsed = (args: {
   createdAt: Date;
   intervalDays: number;
@@ -127,6 +134,61 @@ const getDueCyclesElapsed = (args: {
   return Math.max(0, Math.min(elapsedCycles, maxCycles));
 };
 
+const getNormalizedItemSchedule = (
+  item: any,
+  now = new Date()
+): NormalizedItemSchedule | null => {
+  const plan = item.Plan === "Monthly" ? "Monthly" : item.Plan === "Weekly" ? "Weekly" : null;
+  if (!plan) return null;
+
+  const createdAt = item.createdAt
+    ? new Date(item.createdAt)
+    : (item._id as mongoose.Types.ObjectId).getTimestamp();
+
+  const loanedAmount = getItemLoanedAmount(item);
+  if (!Number.isFinite(loanedAmount) || loanedAmount <= 0) return null;
+
+  const totalCycles = plan === "Monthly" ? Number(item.monthlyPlan || 0) : Number(item.weeklyPlan || 0);
+  if (!Number.isFinite(totalCycles) || totalCycles <= 0) return null;
+
+  const markupMultiplier =
+    plan === "Monthly"
+      ? getMonthlyMarkupMultiplier(totalCycles)
+      : getWeeklyMarkupMultiplier(totalCycles);
+
+  const intervalDays = plan === "Monthly" ? 30 : 7;
+  const nextInstallmentAmount = (loanedAmount * markupMultiplier) / totalCycles;
+  const totalInstallmentAmount = loanedAmount * markupMultiplier;
+
+  const dueCyclesElapsed = getDueCyclesElapsed({
+    createdAt,
+    intervalDays,
+    maxCycles: totalCycles,
+    now,
+  });
+
+  const dueToDateAmount = nextInstallmentAmount * dueCyclesElapsed;
+
+  if (dueCyclesElapsed >= totalCycles) {
+    return {
+      nextDueDate: null,
+      nextInstallmentAmount: Number(nextInstallmentAmount.toFixed(2)),
+      dueToDateAmount: Number(dueToDateAmount.toFixed(2)),
+      totalInstallmentAmount: Number(totalInstallmentAmount.toFixed(2)),
+    };
+  }
+
+  const firstDueDate = addDays(createdAt, intervalDays);
+  const nextDueDate = addDays(firstDueDate, dueCyclesElapsed * intervalDays);
+
+  return {
+    nextDueDate,
+    nextInstallmentAmount: Number(nextInstallmentAmount.toFixed(2)),
+    dueToDateAmount: Number(dueToDateAmount.toFixed(2)),
+    totalInstallmentAmount: Number(totalInstallmentAmount.toFixed(2)),
+  };
+};
+
 const getUnresolvedDueAmount = async (userId: string) => {
   const [items, approvedReceipts] = await Promise.all([
     EasyBoughtItemModel.find({ UserId: new mongoose.Types.ObjectId(userId) })
@@ -140,38 +202,11 @@ const getUnresolvedDueAmount = async (userId: string) => {
       .lean(),
   ]);
 
-  const now = new Date();
   let scheduledDueToDate = 0;
-
   for (const item of items as any[]) {
-    const loanedAmount = getItemLoanedAmount(item);
-
-    if (item.Plan === "Monthly") {
-      const months = Number(item.monthlyPlan || 0);
-      if (months <= 0) continue;
-      const installmentAmount = (loanedAmount * getMonthlyMarkupMultiplier(months)) / months;
-      const createdAt = item.createdAt ? new Date(item.createdAt) : (item._id as mongoose.Types.ObjectId).getTimestamp();
-      const dueCycles = getDueCyclesElapsed({
-        createdAt,
-        intervalDays: 30,
-        maxCycles: months,
-        now,
-      });
-      scheduledDueToDate += installmentAmount * dueCycles;
-      continue;
-    }
-
-    const weeks = Number(item.weeklyPlan || 0);
-    if (weeks <= 0) continue;
-    const installmentAmount = (loanedAmount * getWeeklyMarkupMultiplier(weeks)) / weeks;
-    const createdAt = item.createdAt ? new Date(item.createdAt) : (item._id as mongoose.Types.ObjectId).getTimestamp();
-    const dueCycles = getDueCyclesElapsed({
-      createdAt,
-      intervalDays: 7,
-      maxCycles: weeks,
-      now,
-    });
-    scheduledDueToDate += installmentAmount * dueCycles;
+    const normalized = getNormalizedItemSchedule(item);
+    if (!normalized) continue;
+    scheduledDueToDate += normalized.dueToDateAmount;
   }
 
   const approvedReceiptTotal = approvedReceipts.reduce(
@@ -188,89 +223,51 @@ const getUnresolvedDueAmount = async (userId: string) => {
   };
 };
 
-const getEasyBoughtItemsNextPaymentAmount = async (
-  userId: string,
-  duePlan?: "Monthly" | "Weekly" | null
-): Promise<number> => {
+const getNextDueSnapshot = async (userId: string) => {
   const items = await EasyBoughtItemModel.find({ UserId: new mongoose.Types.ObjectId(userId) })
-    .select({ Plan: 1, weeklyPlan: 1, monthlyPlan: 1, loanedAmount: 1, PhonePrice: 1, TotalPrice: 1, downPayment: 1 })
+    .select({ Plan: 1, weeklyPlan: 1, monthlyPlan: 1, loanedAmount: 1, PhonePrice: 1, TotalPrice: 1, downPayment: 1, createdAt: 1 })
     .lean();
 
-  if (!items.length) return 0;
-
-  const filteredItems = duePlan ? items.filter((item: any) => item.Plan === duePlan) : items;
-  if (!filteredItems.length) return 0;
-
-  const totalDue = filteredItems.reduce((sum, item: any) => {
-    const loanedAmount = getItemLoanedAmount(item);
-    if (item.Plan === "Monthly") {
-      const months = Number(item.monthlyPlan || 0);
-      if (months <= 0) return sum;
-      const nextPayment = (loanedAmount * getMonthlyMarkupMultiplier(months)) / months;
-      return sum + nextPayment;
-    }
-
-    const weeks = Number(item.weeklyPlan || 0);
-    if (weeks <= 0) return sum;
-    const nextPayment = (loanedAmount * getWeeklyMarkupMultiplier(weeks)) / weeks;
-    return sum + nextPayment;
-  }, 0);
-
-  return Number(totalDue.toFixed(2));
-};
-
-const getEasyBoughtItemsNextDueDate = async (
-  userId: string
-): Promise<{ dueDate: Date | null; duePlan: "Monthly" | "Weekly" | null }> => {
-  const items = await EasyBoughtItemModel.find({ UserId: new mongoose.Types.ObjectId(userId) })
-    .select({ Plan: 1, createdAt: 1 })
-    .lean();
-
-  if (!items.length) return { dueDate: null, duePlan: null };
-
-  let nearestDue: Date | null = null;
-  let nearestPlan: "Monthly" | "Weekly" | null = null;
-
-  for (const item of items) {
-    const fallbackCreatedAt = (item._id as mongoose.Types.ObjectId).getTimestamp();
-    const createdAt = item.createdAt ? new Date(item.createdAt) : fallbackCreatedAt;
-    const intervalDays = item.Plan === "Monthly" ? 30 : 7;
-    const firstDueDate = addDays(createdAt, intervalDays);
-    const nextDueDate = getNextRecurringDueDate(firstDueDate, intervalDays);
-
-    if (!nearestDue || nextDueDate < nearestDue) {
-      nearestDue = nextDueDate;
-      nearestPlan = item.Plan === "Monthly" ? "Monthly" : "Weekly";
-    }
+  if (!items.length) {
+    return {
+      dueDate: null as Date | null,
+      nextPaymentAmount: 0,
+    };
   }
 
-  return { dueDate: nearestDue, duePlan: nearestPlan };
-};
+  const normalizedSchedules = (items as any[])
+    .map((item) => getNormalizedItemSchedule(item))
+    .filter((entry): entry is NormalizedItemSchedule => Boolean(entry));
 
-const getApprovedReceiptAmountForCurrentCycle = async (args: {
-  userId: string;
-  duePlan: "Monthly" | "Weekly";
-  nextDueDate: Date;
-}) => {
-  const { userId, duePlan, nextDueDate } = args;
-  const intervalDays = duePlan === "Weekly" ? 7 : 30;
-  const previousDueDate = addDays(nextDueDate, -intervalDays);
+  const upcomingSchedules = normalizedSchedules.filter((entry) => entry.nextDueDate);
+  if (!upcomingSchedules.length) {
+    return {
+      dueDate: null as Date | null,
+      nextPaymentAmount: 0,
+    };
+  }
 
-  const receipts = await ReceiptModel.find({
-    user: new mongoose.Types.ObjectId(userId),
-    status: "approved",
-    plan: duePlan,
-    approvedAt: {
-      $gte: previousDueDate,
-      $lt: nextDueDate,
-    },
-  })
-    .select({ amount: 1 })
-    .lean();
+  const nearestDueDate = upcomingSchedules.reduce((earliest, current) => {
+    if (!earliest) return current.nextDueDate;
+    return (current.nextDueDate as Date) < earliest ? (current.nextDueDate as Date) : earliest;
+  }, null as Date | null);
 
-  return Number(
-    receipts.reduce((sum, receipt) => sum + Number(receipt.amount || 0), 0).toFixed(2)
-  );
+  if (!nearestDueDate) {
+    return {
+      dueDate: null as Date | null,
+      nextPaymentAmount: 0,
+    };
+  }
+
+  const nearestDueDateKey = nearestDueDate.toISOString().slice(0, 10);
+  const nextPaymentAmount = upcomingSchedules
+    .filter((entry) => (entry.nextDueDate as Date).toISOString().slice(0, 10) === nearestDueDateKey)
+    .reduce((sum, entry) => sum + entry.nextInstallmentAmount, 0);
+
+  return {
+    dueDate: nearestDueDate,
+    nextPaymentAmount: Number(nextPaymentAmount.toFixed(2)),
+  };
 };
 
 const getRecentApprovedReceiptPayments = async (userId: string) => {
@@ -291,55 +288,6 @@ const getRecentApprovedReceiptPayments = async (userId: string) => {
   }));
 };
 
-const applyReceiptAdjustmentToDue = (args: {
-  nextPaymentAmount: number;
-  nextPaymentDue: Date | null;
-  receiptAmount: number;
-  duePlan: "Monthly" | "Weekly";
-}) => {
-  const { nextPaymentAmount, nextPaymentDue, receiptAmount, duePlan } = args;
-  const safeDueAmount = Math.max(Number(nextPaymentAmount || 0), 0);
-  const safeReceiptAmount = Math.max(Number(receiptAmount || 0), 0);
-
-  if (safeDueAmount <= 0 || safeReceiptAmount <= 0) {
-    return {
-      nextPaymentAmount: safeDueAmount,
-      nextPaymentDue,
-    };
-  }
-
-  const intervalDays = duePlan === "Weekly" ? 7 : 30;
-
-  if (safeReceiptAmount < safeDueAmount) {
-    // Partial settlement for current cycle only.
-    return {
-      nextPaymentAmount: Number((safeDueAmount - safeReceiptAmount).toFixed(2)),
-      nextPaymentDue,
-    };
-  }
-
-  // Full settlement of current cycle; shift to the next cycle and roll over any overpayment as credit.
-  const installmentAmount = safeDueAmount;
-  const overpaymentCredit = safeReceiptAmount - installmentAmount;
-  const additionallyCoveredCycles =
-    installmentAmount > 0 ? Math.floor(overpaymentCredit / installmentAmount) : 0;
-  const remainingCredit =
-    installmentAmount > 0 ? overpaymentCredit % installmentAmount : 0;
-
-  const totalCyclesToAdvance = 1 + additionallyCoveredCycles;
-  const shiftedDueDate = nextPaymentDue
-    ? addDays(nextPaymentDue, intervalDays * totalCyclesToAdvance)
-    : null;
-
-  const upcomingDueAmount = Number(
-    Math.max(installmentAmount - remainingCredit, 0).toFixed(2)
-  );
-
-  return {
-    nextPaymentAmount: upcomingDueAmount,
-    nextPaymentDue: shiftedDueDate,
-  };
-};
 
 export const CreateEasyBuyPlan = async (req: Request, res: Response) => {
   try {
@@ -481,33 +429,9 @@ export const GetDashboard = async (req: Request, res: Response) => {
     const owedAmount = Number(
       Math.min(unresolvedDueMeta.owedAmount, easyBoughtItemTotals.remainingBalance).toFixed(2)
     );
-    const easyBoughtItemsDueMeta = await getEasyBoughtItemsNextDueDate(userId.toString());
-    const resolvedDueDate = easyBoughtItemsDueMeta.dueDate;
-    const easyBoughtItemsNextPaymentAmount = await getEasyBoughtItemsNextPaymentAmount(
-      userId.toString(),
-      easyBoughtItemsDueMeta.duePlan
-    );
+    const nextDueSnapshot = await getNextDueSnapshot(userId.toString());
     const receiptHistory = await getRecentApprovedReceiptPayments(userId.toString());
-    const currentCycleReceiptAmount =
-      resolvedDueDate && easyBoughtItemsDueMeta.duePlan
-        ? await getApprovedReceiptAmountForCurrentCycle({
-            userId: userId.toString(),
-            duePlan: easyBoughtItemsDueMeta.duePlan,
-            nextDueDate: resolvedDueDate,
-          })
-        : 0;
-
-    const adjustedDue =
-      easyBoughtItemsDueMeta.duePlan && resolvedDueDate
-      ? applyReceiptAdjustmentToDue({
-          nextPaymentAmount: easyBoughtItemsNextPaymentAmount,
-          nextPaymentDue: resolvedDueDate,
-          receiptAmount: currentCycleReceiptAmount,
-          duePlan: easyBoughtItemsDueMeta.duePlan,
-        })
-      : { nextPaymentAmount: easyBoughtItemsNextPaymentAmount, nextPaymentDue: resolvedDueDate };
-
-    const resolvedPlanStatus = adjustedDue.nextPaymentAmount !== 0 ? "active" : "completed";
+    const resolvedPlanStatus = easyBoughtItemTotals.remainingBalance > 0 ? "active" : "completed";
     const dashboard = await getDashboardMetrics(userId.toString());
     if (!dashboard) {
       return res.status(200).json({
@@ -516,8 +440,8 @@ export const GetDashboard = async (req: Request, res: Response) => {
         remainingBalance: easyBoughtItemTotals.remainingBalance,
         owedAmount,
         progress: 0,
-        nextPaymentDue: adjustedDue.nextPaymentDue,
-        nextPaymentAmount: adjustedDue.nextPaymentAmount,
+        nextPaymentDue: nextDueSnapshot.dueDate,
+        nextPaymentAmount: nextDueSnapshot.nextPaymentAmount,
         planStatus: resolvedPlanStatus,
         recentPayments: receiptHistory,
       });
@@ -533,8 +457,8 @@ export const GetDashboard = async (req: Request, res: Response) => {
       totalPaid: easyBoughtItemTotals.totalPaid,
       remainingBalance: easyBoughtItemTotals.remainingBalance,
       owedAmount,
-      nextPaymentDue: adjustedDue.nextPaymentDue,
-      nextPaymentAmount: adjustedDue.nextPaymentAmount,
+      nextPaymentDue: nextDueSnapshot.dueDate,
+      nextPaymentAmount: nextDueSnapshot.nextPaymentAmount,
       planStatus: resolvedPlanStatus,
       recentPayments: mergedRecentPayments,
     });
