@@ -4,10 +4,14 @@ type AuditActorRole = "Admin" | "SuperAdmin";
 type AuditAction =
   | "USER_DELETE"
   | "RECEIPT_APPROVE"
+  | "RECEIPT_REJECT"
+  | "PUBLIC_REQUEST_APPROVE"
+  | "PUBLIC_REQUEST_REJECT"
+  | "PUBLIC_REQUEST_CONVERT"
   | "RECEIPT_UPLOAD_DATE_UPDATE"
   | "USER_NEXT_DUE_DATE_UPDATE"
   | "ITEM_CREATED_DATE_UPDATE";
-type AuditTargetType = "user" | "receipt" | "easyboughtitem";
+type AuditTargetType = "user" | "receipt" | "easyboughtitem" | "publicrequest";
 
 interface AuditLog {
   actor: mongoose.Types.ObjectId;
@@ -40,6 +44,10 @@ const AuditLogSchema = new mongoose.Schema(
       enum: [
         "USER_DELETE",
         "RECEIPT_APPROVE",
+        "RECEIPT_REJECT",
+        "PUBLIC_REQUEST_APPROVE",
+        "PUBLIC_REQUEST_REJECT",
+        "PUBLIC_REQUEST_CONVERT",
         "RECEIPT_UPLOAD_DATE_UPDATE",
         "USER_NEXT_DUE_DATE_UPDATE",
         "ITEM_CREATED_DATE_UPDATE",
@@ -49,7 +57,7 @@ const AuditLogSchema = new mongoose.Schema(
     },
     targetType: {
       type: String,
-      enum: ["user", "receipt", "easyboughtitem"],
+      enum: ["user", "receipt", "easyboughtitem", "publicrequest"],
       required: true,
       index: true,
     },

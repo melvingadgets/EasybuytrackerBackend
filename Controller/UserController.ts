@@ -4,63 +4,84 @@ import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 import { randomUUID } from "crypto";
 import EasyBoughtItemModel from "../Model/EasyBoughtitem.js";
+import EasyBuyCapacityPriceModel from "../Model/EasyBuyCapacityPriceModel.js";
 import mongoose from "mongoose";
 import SessionModel from "../Model/SessionModel.js";
+import { EASYBUY_CATALOG, EASYBUY_CATALOG_MAP, EASYBUY_PLAN_RULES, normalizeCapacityInput } from "../Utils/EasyBuyCatalog.js";
+import { buildEasyBuyPriceLookup, getModelPricesByCapacity } from "../Utils/EasyBuyPricing.js";
+import { config } from "../config/Config.js";
 
-const IPHONE_IMAGE_URLS: Record<string, string> = {
-  "iPhone XR": "https://fdn2.gsmarena.com/vv/bigpic/apple-iphone-xr-new.jpg",
-  "iPhone XS": "https://fdn2.gsmarena.com/vv/bigpic/apple-iphone-xs-new.jpg",
-  "iPhone XS Max": "https://fdn2.gsmarena.com/vv/bigpic/apple-iphone-xs-max-new1.jpg",
-  "iPhone 11": "https://fdn2.gsmarena.com/vv/bigpic/apple-iphone-11.jpg",
-  "iPhone 11 Pro": "https://fdn2.gsmarena.com/vv/bigpic/apple-iphone-11-pro.jpg",
-  "iPhone 11 Pro Max": "https://fdn2.gsmarena.com/vv/bigpic/apple-iphone-11-pro-max.jpg",
-  "iPhone 12": "https://fdn2.gsmarena.com/vv/bigpic/apple-iphone-12.jpg",
-  "iPhone 12 mini": "https://fdn2.gsmarena.com/vv/bigpic/apple-iphone-12-mini.jpg",
-  "iPhone 12 Pro": "https://fdn2.gsmarena.com/vv/bigpic/apple-iphone-12-pro--.jpg",
-  "iPhone 12 Pro Max": "https://fdn2.gsmarena.com/vv/bigpic/apple-iphone-12-pro-max-.jpg",
-  "iPhone 13": "https://fdn2.gsmarena.com/vv/bigpic/apple-iphone-13.jpg",
-  "iPhone 13 mini": "https://fdn2.gsmarena.com/vv/bigpic/apple-iphone-13-mini.jpg",
-  "iPhone 13 Pro": "https://fdn2.gsmarena.com/vv/bigpic/apple-iphone-13-pro.jpg",
-  "iPhone 13 Pro Max": "https://fdn2.gsmarena.com/vv/bigpic/apple-iphone-13-pro-max.jpg",
-  "iPhone 14": "https://fdn2.gsmarena.com/vv/bigpic/apple-iphone-14.jpg",
-  "iPhone 14 Plus": "https://fdn2.gsmarena.com/vv/bigpic/apple-iphone-14-plus.jpg",
-  "iPhone 14 Pro": "https://fdn2.gsmarena.com/vv/bigpic/apple-iphone-14-pro.jpg",
-  "iPhone 14 Pro Max": "https://fdn2.gsmarena.com/vv/bigpic/apple-iphone-14-pro-max.jpg",
-  "iPhone 15": "https://fdn2.gsmarena.com/vv/bigpic/apple-iphone-15.jpg",
-  "iPhone 15 Plus": "https://fdn2.gsmarena.com/vv/bigpic/apple-iphone-15-plus-.jpg",
-  "iPhone 15 Pro": "https://fdn2.gsmarena.com/vv/bigpic/apple-iphone-15-pro.jpg",
-  "iPhone 15 Pro Max": "https://fdn2.gsmarena.com/vv/bigpic/apple-iphone-15-pro-max.jpg",
-  "iPhone 16": "https://fdn2.gsmarena.com/vv/bigpic/apple-iphone-16.jpg",
-  "iPhone 16 Plus": "https://fdn2.gsmarena.com/vv/bigpic/apple-iphone-16-plus.jpg",
-  "iPhone 16 Pro": "https://fdn2.gsmarena.com/vv/bigpic/apple-iphone-16-pro.jpg",
-  "iPhone 16 Pro Max": "https://fdn2.gsmarena.com/vv/bigpic/apple-iphone-16-pro-max.jpg",
-  "iPhone 17": "https://placehold.co/600x600?text=iPhone+17",
-  "iPhone 17 Pro": "https://placehold.co/600x600?text=iPhone+17+Pro",
-  "iPhone 17 Pro Max": "https://placehold.co/600x600?text=iPhone+17+Pro+Max",
-};
-
-const WEEKLY_ONLY_MODELS = new Set([
-  "iPhone XR",
-  "iPhone XS",
-  "iPhone XS Max",
-  "iPhone 11",
-  "iPhone 11 Pro",
-  "iPhone 11 Pro Max",
-  "iPhone 12",
-  "iPhone 12 mini",
-  "iPhone 12 Pro",
-  "iPhone 12 Pro Max",
-]);
-
-const SIXTY_PERCENT_DOWNPAYMENT_MODELS = new Set([
-  "iPhone XR",
-  "iPhone XS",
-  "iPhone XS Max",
+const PROXIED_CATALOG_IMAGE_MODELS = new Set([
   "iPhone 17",
+  "iPhone 17 Air",
   "iPhone 17 Pro",
   "iPhone 17 Pro Max",
 ]);
 
+const GSM_ARENA_17_IMAGE_CANDIDATES: Record<string, string[]> = {
+  "iPhone 17": [
+    "https://fdn2.gsmarena.com/vv/bigpic/apple-iphone-17.jpg",
+    "https://fdn2.gsmarena.com/vv/bigpic/apple-iphone-17-.jpg",
+  ],
+  "iPhone 17 Air": [
+    "https://fdn2.gsmarena.com/vv/bigpic/apple-iphone-17-air.jpg",
+    "https://fdn2.gsmarena.com/vv/bigpic/apple-iphone-17air.jpg",
+  ],
+  "iPhone 17 Pro": [
+    "https://fdn2.gsmarena.com/vv/bigpic/apple-iphone-17-pro.jpg",
+    "https://fdn2.gsmarena.com/vv/bigpic/apple-iphone-17pro.jpg",
+  ],
+  "iPhone 17 Pro Max": [
+    "https://fdn2.gsmarena.com/vv/bigpic/apple-iphone-17-pro-max.jpg",
+    "https://fdn2.gsmarena.com/vv/bigpic/apple-iphone-17-pro-max-.jpg",
+    "https://fdn2.gsmarena.com/vv/bigpic/apple-iphone-17pro-max.jpg",
+  ],
+};
+
+const getRequestBaseUrl = (req: Request): string => {
+  const forwardedProto = (String(req.get("x-forwarded-proto") || "").split(",")[0] || "").trim();
+  const forwardedHost = (String(req.get("x-forwarded-host") || "").split(",")[0] || "").trim();
+  const protocol = forwardedProto || req.protocol || "http";
+  const host = forwardedHost || req.get("host") || "localhost:552";
+  return `${protocol}://${host}`;
+};
+
+const buildCatalogImageProxyUrl = (req: Request, model: string): string =>
+  `${getRequestBaseUrl(req)}/api/v1/user/easybuy-catalog-image/${encodeURIComponent(model)}`;
+
+const shouldProxyCatalogImage = (model: string): boolean => PROXIED_CATALOG_IMAGE_MODELS.has(model);
+
+const resolveCatalogImageUrl = (
+  req: Request,
+  entry: (typeof EASYBUY_CATALOG)[number]
+): string => (shouldProxyCatalogImage(entry.model) ? buildCatalogImageProxyUrl(req, entry.model) : entry.imageUrl);
+
+const getCatalogImageFetchCandidates = (entry: (typeof EASYBUY_CATALOG)[number]): string[] => {
+  const candidates = [entry.imageUrl, ...(GSM_ARENA_17_IMAGE_CANDIDATES[entry.model] || [])];
+  return Array.from(new Set(candidates));
+};
+
+const escapeXml = (value: string): string =>
+  value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+
+const sendCatalogFallbackSvg = (res: Response, model: string) => {
+  const safeModel = escapeXml(model || "iPhone");
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360" viewBox="0 0 640 360">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0f172a"/>
+      <stop offset="100%" stop-color="#1e293b"/>
+    </linearGradient>
+  </defs>
+  <rect width="640" height="360" fill="url(#bg)"/>
+  <rect x="110" y="60" width="420" height="240" rx="28" fill="#334155" stroke="#475569" stroke-width="2"/>
+  <text x="320" y="186" font-family="Arial, sans-serif" font-size="28" text-anchor="middle" fill="#f8fafc">${safeModel}</text>
+  <text x="320" y="220" font-family="Arial, sans-serif" font-size="16" text-anchor="middle" fill="#cbd5e1">Preview unavailable</text>
+</svg>`;
+  res.setHeader("Content-Type", "image/svg+xml; charset=utf-8");
+  res.setHeader("Cache-Control", "public, max-age=300");
+  return res.status(200).send(svg);
+};
 
 
 export const CreateAdmin = async (req: Request, res: Response) => {
@@ -138,7 +159,7 @@ export const LoginUser = async (
               email: checkEmail.email,
               jti,
             },
-            "variationofeventsisatrandom",
+            config.jwtSecret,
             { expiresIn: "40m" }
           );
           const decodedToken = jwt.decode(token) as jwt.JwtPayload | null;
@@ -289,6 +310,11 @@ try {
         const normalizedItems = easyBoughtItems.map((item: any) => ({
           ...item,
           PhonePrice: item.PhonePrice ?? item.TotalPrice ?? 0,
+          IphoneImageUrl: (() => {
+            const model = String(item.IphoneModel || "");
+            const catalogEntry = EASYBUY_CATALOG_MAP.get(model);
+            return catalogEntry ? resolveCatalogImageUrl(req, catalogEntry) : item.IphoneImageUrl;
+          })(),
         }));
         return res.status(200).json({
           message: "EasyBoughtItems retrieved successfully",
@@ -328,6 +354,79 @@ export const GetAllUsers = async (req: Request, res: Response) => {
       });
     }
 }
+
+export const GetEasyBuyCatalog = async (req: Request, res: Response) => {
+  try {
+    const pricingDocs = await EasyBuyCapacityPriceModel.find()
+      .select({ model: 1, capacity: 1, price: 1, _id: 0 })
+      .lean();
+    const priceLookup = buildEasyBuyPriceLookup(pricingDocs);
+
+    const models = EASYBUY_CATALOG.map((entry) => ({
+      ...entry,
+      imageUrl: resolveCatalogImageUrl(req, entry),
+      pricesByCapacity: getModelPricesByCapacity(priceLookup, entry.model),
+    }));
+
+    return res.status(200).json({
+      message: "EasyBuy catalog retrieved successfully",
+      data: {
+        models,
+        planRules: EASYBUY_PLAN_RULES,
+      },
+    });
+  } catch (error: any) {
+    return res.status(400).json({
+      message: "Failed to retrieve EasyBuy catalog",
+      reason: error?.message || "Unknown error",
+    });
+  }
+};
+
+export const GetEasyBuyCatalogImage = async (req: Request, res: Response) => {
+  const requestedModel = decodeURIComponent(String(req.params.model || "")).trim();
+  const entry = EASYBUY_CATALOG_MAP.get(requestedModel);
+
+  if (!entry) {
+    return sendCatalogFallbackSvg(res, requestedModel || "iPhone");
+  }
+
+  const candidates = getCatalogImageFetchCandidates(entry);
+
+  for (const candidateUrl of candidates) {
+    if (!/^https?:\/\//i.test(candidateUrl)) continue;
+
+    try {
+      const response = await fetch(candidateUrl, {
+        method: "GET",
+        redirect: "follow",
+        headers: {
+          "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+          Referer: "https://www.apple.com/",
+          Accept: "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+        },
+      });
+
+      if (!response.ok) continue;
+
+      const contentType = String(response.headers.get("content-type") || "").toLowerCase();
+      if (!contentType.startsWith("image/")) continue;
+
+      const payload = Buffer.from(await response.arrayBuffer());
+      if (!payload.length) continue;
+
+      res.setHeader("Content-Type", contentType);
+      res.setHeader("Cache-Control", "public, max-age=86400, stale-while-revalidate=604800");
+      return res.status(200).send(payload);
+    } catch {
+      // try next candidate
+    }
+  }
+
+  return sendCatalogFallbackSvg(res, entry.model);
+};
+
 export const CreateEasyBoughtItem = async (req: Request, res: Response) => {
     const checkrole = req.user?.role;  
     if (checkrole !== "Admin") {
@@ -357,6 +456,7 @@ export const CreateEasyBoughtItem = async (req: Request, res: Response) => {
     const {
       IphoneModel,
       ItemName,
+      capacity,
       Plan,
       PhonePrice,
       TotalPrice,
@@ -366,9 +466,11 @@ export const CreateEasyBoughtItem = async (req: Request, res: Response) => {
       UserEmail,
     } = req.body;
     const resolvedIphoneModel = String(IphoneModel || ItemName || "").trim();
+    const resolvedCapacity = normalizeCapacityInput(capacity);
     const resolvedUserEmail = String(UserEmail || req.user?.email || "").trim();
     if (
       !resolvedIphoneModel ||
+      !resolvedCapacity ||
       (PhonePrice === undefined && TotalPrice === undefined) ||
       !resolvedUserEmail
     ) {
@@ -377,9 +479,16 @@ export const CreateEasyBoughtItem = async (req: Request, res: Response) => {
       });
     }
 
-    if (!Object.prototype.hasOwnProperty.call(IPHONE_IMAGE_URLS, resolvedIphoneModel)) {
+    const catalogEntry = EASYBUY_CATALOG_MAP.get(resolvedIphoneModel);
+    if (!catalogEntry) {
       return res.status(400).json({
         message: "Unsupported iPhone model",
+      });
+    }
+
+    if (!catalogEntry.capacities.includes(resolvedCapacity)) {
+      return res.status(400).json({
+        message: `Capacity ${resolvedCapacity} is unavailable for ${resolvedIphoneModel}. Allowed capacities: ${catalogEntry.capacities.join(", ")}`,
       });
     }
 
@@ -391,27 +500,27 @@ export const CreateEasyBoughtItem = async (req: Request, res: Response) => {
       });
     }
 
-    const isWeeklyOnly = WEEKLY_ONLY_MODELS.has(resolvedIphoneModel);
+    const isWeeklyOnly = catalogEntry.allowedPlans.length === 1 && catalogEntry.allowedPlans[0] === "Weekly";
     const resolvedPlan = isWeeklyOnly ? "Weekly" : Plan;
 
-    if (!["Monthly", "Weekly"].includes(resolvedPlan)) {
+    if (!catalogEntry.allowedPlans.includes(resolvedPlan)) {
       return res.status(400).json({
-        message: "Plan must be Monthly or Weekly",
+        message: `Plan must be one of: ${catalogEntry.allowedPlans.join(", ")}`,
       });
     }
 
     const monthlyPlanNumber = Number(monthlyPlan);
     const weeklyPlanNumber = Number(weeklyPlan);
 
-    if (resolvedPlan === "Monthly" && ![1, 2, 3].includes(monthlyPlanNumber)) {
+    if (resolvedPlan === "Monthly" && !EASYBUY_PLAN_RULES.monthlyDurations.includes(monthlyPlanNumber)) {
       return res.status(400).json({
-        message: "monthlyPlan must be 1, 2, or 3 for Monthly plan",
+        message: `monthlyPlan must be one of: ${EASYBUY_PLAN_RULES.monthlyDurations.join(", ")}`,
       });
     }
 
-    if (resolvedPlan === "Weekly" && ![4, 8, 12].includes(weeklyPlanNumber)) {
+    if (resolvedPlan === "Weekly" && !EASYBUY_PLAN_RULES.weeklyDurations.includes(weeklyPlanNumber)) {
       return res.status(400).json({
-        message: "weeklyPlan must be 4, 8, or 12 for Weekly plan",
+        message: `weeklyPlan must be one of: ${EASYBUY_PLAN_RULES.weeklyDurations.join(", ")}`,
       });
     }
 
@@ -422,7 +531,7 @@ export const CreateEasyBoughtItem = async (req: Request, res: Response) => {
       });
     }
 
-    const downPaymentMultiplier = SIXTY_PERCENT_DOWNPAYMENT_MODELS.has(resolvedIphoneModel) ? 0.6 : 0.4;
+    const downPaymentMultiplier = catalogEntry.downPaymentPercentage / 100;
     const minimumDownPayment = phonePriceNumber * downPaymentMultiplier;
     const requestedDownPayment =
       downPayment === undefined || downPayment === null || downPayment === ""
@@ -450,16 +559,17 @@ export const CreateEasyBoughtItem = async (req: Request, res: Response) => {
     const normalizedDownPayment = Number(requestedDownPayment.toFixed(2));
     const loanedAmount = Number(Math.max(phonePriceNumber - normalizedDownPayment, 0).toFixed(2));
     
-    const CheckUserInEaseBought=await EasyBoughtItemModel.findOne({UserEmail:UserEmail});
+    const CheckUserInEaseBought=await EasyBoughtItemModel.findOne({UserEmail:resolvedUserEmail});
     if(CheckUserInEaseBought){
       return res.status(409).json({
-        message: "first pay your money finish bros 😒",
+        message: "User already has an active EasyBought item",
       });
     }
 
     const easyBoughtPayload: Record<string, any> = {
       IphoneModel: resolvedIphoneModel,
-      IphoneImageUrl: IPHONE_IMAGE_URLS[resolvedIphoneModel],
+      IphoneImageUrl: resolveCatalogImageUrl(req, catalogEntry),
+      capacity: resolvedCapacity,
       Plan: resolvedPlan,
       downPayment: normalizedDownPayment,
       loanedAmount,
@@ -535,3 +645,4 @@ try {
 }
 
  }
+

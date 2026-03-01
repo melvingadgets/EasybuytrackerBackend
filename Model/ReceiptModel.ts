@@ -1,6 +1,6 @@
 import mongoose from "mongoose";
 
-type ReceiptStatus = "pending" | "approved";
+type ReceiptStatus = "pending" | "approved" | "rejected";
 type ReceiptFileType = "image" | "pdf";
 
 interface Receipt {
@@ -12,6 +12,9 @@ interface Receipt {
   cloudinaryPublicId: string;
   status: ReceiptStatus;
   approvedAt?: Date;
+  rejectedAt?: Date;
+  rejectedBy?: mongoose.Types.ObjectId;
+  rejectionReason?: string;
   createdAt?: Date;
   updatedAt?: Date;
 }
@@ -52,12 +55,23 @@ const ReceiptSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ["pending", "approved"],
+      enum: ["pending", "approved", "rejected"],
       default: "pending",
       index: true,
     },
     approvedAt: {
       type: Date,
+    },
+    rejectedAt: {
+      type: Date,
+    },
+    rejectedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "user",
+    },
+    rejectionReason: {
+      type: String,
+      trim: true,
     },
   },
   { timestamps: true }

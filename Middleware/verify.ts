@@ -2,6 +2,7 @@ import type { NextFunction, Request, Response } from "express";
 import jwt, { type JwtPayload } from "jsonwebtoken";
 import SessionModel from "../Model/SessionModel.js";
 import UserModel from "../Model/UserModel.js";
+import { config } from "../config/Config.js";
 
 type AppRole = "Admin" | "User" | "SuperAdmin";
 
@@ -13,7 +14,7 @@ type TokenPayload = JwtPayload & {
   jti?: string;
 };
 
-const JWT_SECRET = "variationofeventsisatrandom";
+const JWT_SECRET = config.jwtSecret;
 
 const getTokenFromRequest = (req: Request): string => {
   const authHeader = req.headers.authorization;

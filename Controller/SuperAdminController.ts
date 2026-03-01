@@ -3,11 +3,25 @@ import mongoose from "mongoose";
 import AuditLogModel from "../Model/AuditLogModel.js";
 import EasyBoughtItemModel from "../Model/EasyBoughtitem.js";
 import EasyBuyPlanModel from "../Model/EasyBuyPlanModel.js";
+import EasyBuyCapacityPriceModel from "../Model/EasyBuyCapacityPriceModel.js";
 import PaymentModel from "../Model/PaymentModel.js";
 import ProfileModel from "../Model/Profilemodel.js";
+import PublicEasyBuyRequestModel from "../Model/PublicEasyBuyRequestModel.js";
 import ReceiptModel from "../Model/ReceiptModel.js";
 import SessionModel from "../Model/SessionModel.js";
 import UserModel from "../Model/UserModel.js";
+import {
+  EASYBUY_CATALOG,
+  EASYBUY_CATALOG_MAP,
+  EASYBUY_PLAN_RULES,
+  normalizeCapacityInput,
+} from "../Utils/EasyBuyCatalog.js";
+import {
+  buildEasyBuyPriceLookup,
+  getModelPricesByCapacity,
+  isValidCatalogModelCapacity,
+  normalizePricingUpdateInput,
+} from "../Utils/EasyBuyPricing.js";
 
 const normalizeReason = (value: unknown) => {
   const trimmed = String(value ?? "").trim();
@@ -25,6 +39,31 @@ const parseDateInput = (value: unknown, fieldName: string): Date => {
     throw new Error(`${fieldName} must be a valid date`);
   }
   return parsed;
+};
+
+const buildEasyBuyPricingModels = async () => {
+  const pricingDocs = await EasyBuyCapacityPriceModel.find()
+    .select({ model: 1, capacity: 1, price: 1, _id: 0 })
+    .lean();
+  const priceLookup = buildEasyBuyPriceLookup(pricingDocs);
+
+  return EASYBUY_CATALOG.map((entry) => ({
+    model: entry.model,
+    capacities: [...entry.capacities],
+    pricesByCapacity: getModelPricesByCapacity(priceLookup, entry.model),
+  }));
+};
+
+const normalizeString = (value: unknown): string => String(value ?? "").trim();
+const normalizeEmail = (value: unknown): string => normalizeString(value).toLowerCase();
+const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+const parsePositiveNumber = (value: unknown, fieldName: string): number => {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) {
+    throw new Error(`${fieldName} must be greater than zero`);
+  }
+  return Number(numeric.toFixed(2));
 };
 
 export const SuperAdminGetAllUsers = async (_req: Request, res: Response) => {
@@ -567,6 +606,468 @@ export const SuperAdminUpdateItemCreatedDate = async (req: Request, res: Respons
       message: "Failed to update item created date",
       reason: error?.message || "Unknown error",
     });
+  }
+};
+
+export const SuperAdminGetEasyBuyPricing = async (_req: Request, res: Response) => {
+  try {
+    const models = await buildEasyBuyPricingModels();
+    return res.status(200).json({
+      message: "EasyBuy pricing retrieved successfully",
+      data: {
+        models,
+      },
+    });
+  } catch (error: any) {
+    return res.status(400).json({
+      message: "Failed to retrieve EasyBuy pricing",
+      reason: error?.message || "Unknown error",
+    });
+  }
+};
+
+export const SuperAdminUpdateEasyBuyPricing = async (req: Request, res: Response) => {
+  const actorId = req.user?._id;
+  const actorRole = req.user?.role;
+
+  if (!actorId || actorRole !== "SuperAdmin") {
+    return res.status(401).json({ message: "Access denied" });
+  }
+
+  const updates = Array.isArray(req.body?.updates) ? req.body.updates : [];
+  if (!updates.length) {
+    return res.status(400).json({
+      message: "updates is required and must contain at least one item",
+    });
+  }
+
+  const validatedUpdates = new Map<string, { model: string; capacity: string; price: number }>();
+
+  for (const update of updates) {
+    const { model, capacity, price } = normalizePricingUpdateInput(update);
+
+    if (!model || !capacity) {
+      return res.status(400).json({
+        message: "Each update item must include model and capacity",
+      });
+    }
+
+    if (!isValidCatalogModelCapacity(model, capacity)) {
+      return res.status(400).json({
+        message: `Unsupported model/capacity pair: ${model} ${capacity}`,
+      });
+    }
+
+    if (!Number.isFinite(price) || price <= 0) {
+      return res.status(400).json({
+        message: `Invalid price for ${model} ${capacity}. Price must be greater than zero.`,
+      });
+    }
+
+    validatedUpdates.set(`${model}__${capacity}`, {
+      model,
+      capacity,
+      price: Number(price.toFixed(2)),
+    });
+  }
+
+  const bulkOperations = Array.from(validatedUpdates.values()).map((item) => ({
+    updateOne: {
+      filter: { model: item.model, capacity: item.capacity },
+      update: {
+        $set: {
+          model: item.model,
+          capacity: item.capacity,
+          price: item.price,
+          updatedBy: new mongoose.Types.ObjectId(actorId),
+        },
+      },
+      upsert: true,
+    },
+  }));
+
+  try {
+    if (bulkOperations.length) {
+      await EasyBuyCapacityPriceModel.bulkWrite(bulkOperations, { ordered: false });
+    }
+
+    const models = await buildEasyBuyPricingModels();
+    return res.status(200).json({
+      message: "EasyBuy pricing updated successfully",
+      data: {
+        updatedCount: bulkOperations.length,
+        models,
+      },
+    });
+  } catch (error: any) {
+    return res.status(400).json({
+      message: "Failed to update EasyBuy pricing",
+      reason: error?.message || "Unknown error",
+    });
+  }
+};
+
+export const SuperAdminListPublicEasyBuyRequests = async (req: Request, res: Response) => {
+  try {
+    const status = normalizeString(req.query?.status);
+    const search = normalizeString(req.query?.search);
+    const safeSearch = search ? escapeRegExp(search) : "";
+    const page = Math.max(Number(req.query?.page) || 1, 1);
+    const limit = Math.min(Math.max(Number(req.query?.limit) || 20, 1), 100);
+
+    const filter: Record<string, unknown> = {};
+    if (status) {
+      filter.status = status;
+    }
+    if (safeSearch) {
+      filter.$or = [
+        { requestId: { $regex: safeSearch, $options: "i" } },
+        { fullName: { $regex: safeSearch, $options: "i" } },
+        { email: { $regex: safeSearch, $options: "i" } },
+        { phone: { $regex: safeSearch, $options: "i" } },
+      ];
+    }
+
+    const [items, total] = await Promise.all([
+      PublicEasyBuyRequestModel.find(filter)
+        .sort({ createdAt: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .select({ verificationTokenHash: 0, verificationTokenExpiresAt: 0 })
+        .populate("reviewedBy", "fullName email role")
+        .lean(),
+      PublicEasyBuyRequestModel.countDocuments(filter),
+    ]);
+
+    return res.status(200).json({
+      message: "Public EasyBuy requests retrieved successfully",
+      data: items,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.max(Math.ceil(total / limit), 1),
+      },
+    });
+  } catch (error: any) {
+    return res.status(400).json({
+      message: "Failed to retrieve public requests",
+      reason: error?.message || "Unknown error",
+    });
+  }
+};
+
+export const SuperAdminApprovePublicEasyBuyRequest = async (req: Request, res: Response) => {
+  const actorId = req.user?._id;
+  const actorRole = req.user?.role;
+  if (!actorId || actorRole !== "SuperAdmin") {
+    return res.status(401).json({ message: "Access denied" });
+  }
+
+  const requestId = normalizeString(req.params?.requestId);
+  if (!requestId) {
+    return res.status(400).json({ message: "requestId is required" });
+  }
+
+  const reason = normalizeReason(req.body?.reason);
+
+  try {
+    const updated = await PublicEasyBuyRequestModel.findOneAndUpdate(
+      { requestId, status: { $in: ["verified"] } },
+      {
+        $set: {
+          status: "approved",
+          approvedAt: new Date(),
+          reviewedBy: new mongoose.Types.ObjectId(actorId),
+          reviewedAt: new Date(),
+        },
+      },
+      { returnDocument: "after" }
+    ).lean();
+
+    if (!updated) {
+      const existing = await PublicEasyBuyRequestModel.findOne({ requestId })
+        .select({ requestId: 1, status: 1 })
+        .lean();
+      if (!existing) {
+        return res.status(404).json({ message: "Public request not found" });
+      }
+      return res.status(409).json({ message: `Request is currently ${existing.status}` });
+    }
+
+    await AuditLogModel.create({
+      actor: new mongoose.Types.ObjectId(actorId),
+      actorRole,
+      action: "PUBLIC_REQUEST_APPROVE",
+      targetType: "publicrequest",
+      targetId: new mongoose.Types.ObjectId(String(updated._id)),
+      reason,
+      metadata: {
+        requestId: updated.requestId,
+        email: updated.email,
+        iphoneModel: updated.iphoneModel,
+        capacity: updated.capacity,
+        plan: updated.plan,
+      },
+    });
+
+    return res.status(200).json({
+      message: "Public request approved",
+      data: updated,
+    });
+  } catch (error: any) {
+    return res.status(400).json({
+      message: "Failed to approve public request",
+      reason: error?.message || "Unknown error",
+    });
+  }
+};
+
+export const SuperAdminRejectPublicEasyBuyRequest = async (req: Request, res: Response) => {
+  const actorId = req.user?._id;
+  const actorRole = req.user?.role;
+  if (!actorId || actorRole !== "SuperAdmin") {
+    return res.status(401).json({ message: "Access denied" });
+  }
+
+  const requestId = normalizeString(req.params?.requestId);
+  if (!requestId) {
+    return res.status(400).json({ message: "requestId is required" });
+  }
+
+  const rejectionReason = normalizeString(req.body?.reason);
+  if (!rejectionReason) {
+    return res.status(400).json({ message: "reason is required to reject request" });
+  }
+
+  try {
+    const updated = await PublicEasyBuyRequestModel.findOneAndUpdate(
+      { requestId, status: { $in: ["pending_verification", "verified", "approved"] } },
+      {
+        $set: {
+          status: "rejected",
+          rejectedAt: new Date(),
+          rejectionReason,
+          reviewedBy: new mongoose.Types.ObjectId(actorId),
+          reviewedAt: new Date(),
+        },
+      },
+      { returnDocument: "after" }
+    ).lean();
+
+    if (!updated) {
+      const existing = await PublicEasyBuyRequestModel.findOne({ requestId })
+        .select({ requestId: 1, status: 1 })
+        .lean();
+      if (!existing) {
+        return res.status(404).json({ message: "Public request not found" });
+      }
+      return res.status(409).json({ message: `Request is currently ${existing.status}` });
+    }
+
+    await AuditLogModel.create({
+      actor: new mongoose.Types.ObjectId(actorId),
+      actorRole,
+      action: "PUBLIC_REQUEST_REJECT",
+      targetType: "publicrequest",
+      targetId: new mongoose.Types.ObjectId(String(updated._id)),
+      reason: rejectionReason,
+      metadata: {
+        requestId: updated.requestId,
+        email: updated.email,
+        iphoneModel: updated.iphoneModel,
+        capacity: updated.capacity,
+        plan: updated.plan,
+      },
+    });
+
+    return res.status(200).json({
+      message: "Public request rejected",
+      data: updated,
+    });
+  } catch (error: any) {
+    return res.status(400).json({
+      message: "Failed to reject public request",
+      reason: error?.message || "Unknown error",
+    });
+  }
+};
+
+export const SuperAdminConvertPublicEasyBuyRequest = async (req: Request, res: Response) => {
+  const actorId = req.user?._id;
+  const actorRole = req.user?.role;
+  if (!actorId || actorRole !== "SuperAdmin") {
+    return res.status(401).json({ message: "Access denied" });
+  }
+
+  const requestId = normalizeString(req.params?.requestId);
+  if (!requestId) {
+    return res.status(400).json({ message: "requestId is required" });
+  }
+
+  const reason = normalizeReason(req.body?.reason);
+
+  const session = await mongoose.startSession();
+  try {
+    let responseData: Record<string, unknown> = {};
+
+    await session.withTransaction(async () => {
+      const requestDoc = await PublicEasyBuyRequestModel.findOne({
+        requestId,
+        status: "approved",
+      }).session(session);
+
+      if (!requestDoc) {
+        const existing = await PublicEasyBuyRequestModel.findOne({ requestId })
+          .select({ requestId: 1, status: 1 })
+          .session(session)
+          .lean();
+        if (!existing) {
+          throw new Error("Public request not found");
+        }
+        throw new Error(`Request is currently ${existing.status}`);
+      }
+
+      const iphoneModel = normalizeString(requestDoc.iphoneModel);
+      const capacity = normalizeCapacityInput(requestDoc.capacity);
+      const plan = normalizeString(req.body?.plan || requestDoc.plan) as "Monthly" | "Weekly";
+      const catalogEntry = EASYBUY_CATALOG_MAP.get(iphoneModel);
+      if (!catalogEntry) {
+        throw new Error("Unsupported iPhone model");
+      }
+      if (!catalogEntry.capacities.includes(capacity)) {
+        throw new Error(`Capacity ${capacity} is unavailable for ${iphoneModel}`);
+      }
+      if (!catalogEntry.allowedPlans.includes(plan)) {
+        throw new Error(`Plan must be one of: ${catalogEntry.allowedPlans.join(", ")}`);
+      }
+
+      const resolvedUserEmail = normalizeEmail(req.body?.userEmail || requestDoc.email);
+      if (!resolvedUserEmail) {
+        throw new Error("userEmail is required");
+      }
+
+      const user = await UserModel.findOne({ email: resolvedUserEmail }).session(session).lean();
+      if (!user) {
+        throw new Error("No existing user found for this email. Create user account first.");
+      }
+
+      const existingEasyBought = await EasyBoughtItemModel.findOne({ UserEmail: resolvedUserEmail })
+        .session(session)
+        .lean();
+      if (existingEasyBought) {
+        throw new Error("User already has an active EasyBought item");
+      }
+
+      const phonePrice = parsePositiveNumber(req.body?.phonePrice, "phonePrice");
+      const minimumDownPayment = Number(((catalogEntry.downPaymentPercentage / 100) * phonePrice).toFixed(2));
+      const downPayment =
+        req.body?.downPayment === undefined || req.body?.downPayment === null || req.body?.downPayment === ""
+          ? minimumDownPayment
+          : parsePositiveNumber(req.body?.downPayment, "downPayment");
+
+      if (downPayment < minimumDownPayment) {
+        throw new Error(`downPayment must be at least ${minimumDownPayment.toFixed(2)}`);
+      }
+      if (downPayment > phonePrice) {
+        throw new Error("downPayment cannot be greater than phonePrice");
+      }
+
+      const monthlyPlanNumber = Number(req.body?.monthlyPlan);
+      const weeklyPlanNumber = Number(req.body?.weeklyPlan);
+
+      const payload: Record<string, unknown> = {
+        IphoneModel: iphoneModel,
+        IphoneImageUrl: catalogEntry.imageUrl,
+        capacity,
+        Plan: plan,
+        downPayment: Number(downPayment.toFixed(2)),
+        loanedAmount: Number((phonePrice - downPayment).toFixed(2)),
+        PhonePrice: phonePrice,
+        UserId: user._id,
+        UserEmail: resolvedUserEmail,
+      };
+
+      if (plan === "Monthly") {
+        if (!EASYBUY_PLAN_RULES.monthlyDurations.includes(monthlyPlanNumber)) {
+          throw new Error(
+            `monthlyPlan must be one of: ${EASYBUY_PLAN_RULES.monthlyDurations.join(", ")}`
+          );
+        }
+        payload.monthlyPlan = monthlyPlanNumber;
+      } else {
+        if (!EASYBUY_PLAN_RULES.weeklyDurations.includes(weeklyPlanNumber)) {
+          throw new Error(`weeklyPlan must be one of: ${EASYBUY_PLAN_RULES.weeklyDurations.join(", ")}`);
+        }
+        payload.weeklyPlan = weeklyPlanNumber;
+      }
+
+      const createdItems = await EasyBoughtItemModel.create([payload], { session });
+      const createdItem = createdItems[0];
+      if (!createdItem) {
+        throw new Error("Failed to create EasyBought item");
+      }
+
+      requestDoc.status = "converted";
+      requestDoc.convertedAt = new Date();
+      requestDoc.convertedEasyBoughtItemId = createdItem._id as any;
+      requestDoc.reviewedBy = new mongoose.Types.ObjectId(actorId);
+      requestDoc.reviewedAt = new Date();
+      await requestDoc.save({ session });
+
+      await AuditLogModel.create(
+        [
+          {
+            actor: new mongoose.Types.ObjectId(actorId),
+            actorRole,
+            action: "PUBLIC_REQUEST_CONVERT",
+            targetType: "publicrequest",
+            targetId: new mongoose.Types.ObjectId(String(requestDoc._id)),
+            reason,
+            metadata: {
+              requestId: requestDoc.requestId,
+              email: requestDoc.email,
+              iphoneModel,
+              capacity,
+              plan,
+              convertedEasyBoughtItemId: createdItem._id,
+              convertedForUserEmail: resolvedUserEmail,
+            },
+          },
+        ],
+        { session }
+      );
+
+      responseData = {
+        request: {
+          requestId: requestDoc.requestId,
+          status: requestDoc.status,
+          convertedAt: requestDoc.convertedAt,
+          convertedEasyBoughtItemId: requestDoc.convertedEasyBoughtItemId,
+        },
+        item: createdItem,
+      };
+    });
+
+    return res.status(200).json({
+      message: "Public request converted successfully",
+      data: responseData,
+    });
+  } catch (error: any) {
+    const message = normalizeString(error?.message) || "Unknown error";
+    const lower = message.toLowerCase();
+    if (lower.includes("not found")) {
+      return res.status(404).json({ message });
+    }
+    if (lower.includes("currently")) {
+      return res.status(409).json({ message });
+    }
+    return res.status(400).json({
+      message: "Failed to convert public request",
+      reason: message,
+    });
+  } finally {
+    await session.endSession();
   }
 };
 

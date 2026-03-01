@@ -4,9 +4,15 @@ import {
   SuperAdminDeleteUserOrAdmin,
   SuperAdminGetAllUsers,
   SuperAdminGetLoginStats,
+  SuperAdminListPublicEasyBuyRequests,
+  SuperAdminApprovePublicEasyBuyRequest,
+  SuperAdminRejectPublicEasyBuyRequest,
+  SuperAdminConvertPublicEasyBuyRequest,
   SuperAdminPreviewItemCreatedDate,
   SuperAdminPreviewReceiptUploadedDate,
   SuperAdminPreviewUserNextDueDate,
+  SuperAdminGetEasyBuyPricing,
+  SuperAdminUpdateEasyBuyPricing,
   SuperAdminUpdateItemCreatedDate,
   SuperAdminUpdateReceiptUploadedDate,
   SuperAdminUpdateUserNextDueDate,
@@ -29,6 +35,32 @@ router.delete(
   SuperAdminDeleteUserOrAdmin
 );
 router.get("/login-stats", verifyToken, requireRole(["SuperAdmin"]), SuperAdminGetLoginStats);
+router.get("/easybuy-pricing", verifyToken, requireRole(["SuperAdmin"]), SuperAdminGetEasyBuyPricing);
+router.patch("/easybuy-pricing", verifyToken, requireRole(["SuperAdmin"]), SuperAdminUpdateEasyBuyPricing);
+router.get(
+  "/public-easybuy-requests",
+  verifyToken,
+  requireRole(["SuperAdmin"]),
+  SuperAdminListPublicEasyBuyRequests
+);
+router.patch(
+  "/public-easybuy-requests/:requestId/approve",
+  verifyToken,
+  requireRole(["SuperAdmin"]),
+  SuperAdminApprovePublicEasyBuyRequest
+);
+router.patch(
+  "/public-easybuy-requests/:requestId/reject",
+  verifyToken,
+  requireRole(["SuperAdmin"]),
+  SuperAdminRejectPublicEasyBuyRequest
+);
+router.post(
+  "/public-easybuy-requests/:requestId/convert",
+  verifyToken,
+  requireRole(["SuperAdmin"]),
+  SuperAdminConvertPublicEasyBuyRequest
+);
 router.get(
   "/maintenance/receipts/:receiptId/uploaded-date/preview",
   verifyToken,

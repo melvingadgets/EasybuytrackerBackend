@@ -1,0 +1,525 @@
+0 verbose cli C:\Program Files\nodejs\node.exe C:\Program Files\nodejs\node_modules\npm\bin\npm-cli.js
+1 info using npm@10.9.2
+2 info using node@v22.15.1
+3 silly config load:file:C:\Program Files\nodejs\node_modules\npm\npmrc
+4 silly config load:file:C:\Users\HP\Desktop\EasybuyTracker\.npmrc
+5 silly config load:file:C:\Users\HP\.npmrc
+6 silly config load:file:C:\Users\HP\AppData\Roaming\npm\etc\npmrc
+7 verbose title npm install
+8 verbose argv "install" "--cache" ".npm-cache"
+9 verbose logfile logs-max:10 dir:C:\Users\HP\Desktop\EasybuyTracker\.npm-cache\_logs\2026-03-01T12_39_32_899Z-
+10 verbose logfile C:\Users\HP\Desktop\EasybuyTracker\.npm-cache\_logs\2026-03-01T12_39_32_899Z-debug-0.log
+11 silly logfile done cleaning log files
+12 silly packumentCache heap:4345298944 maxSize:1086324736 maxEntrySize:543162368
+13 silly idealTree buildDeps
+14 silly fetch manifest ejs@^3.1.10
+15 silly packumentCache full:https://registry.npmjs.org/ejs cache-miss
+16 http fetch GET 200 https://registry.npmjs.org/ejs 1495ms (cache miss)
+17 silly packumentCache full:https://registry.npmjs.org/ejs set size:undefined disposed:false
+18 silly fetch manifest nodemailer@^7.0.10
+19 silly packumentCache full:https://registry.npmjs.org/nodemailer cache-miss
+20 http fetch GET 200 https://registry.npmjs.org/npm 1704ms
+21 http fetch GET 200 https://registry.npmjs.org/nodemailer 434ms (cache miss)
+22 silly packumentCache full:https://registry.npmjs.org/nodemailer set size:undefined disposed:false
+23 silly fetch manifest @types/ejs@^3.1.5
+24 silly packumentCache full:https://registry.npmjs.org/@types%2fejs cache-miss
+25 http fetch GET 200 https://registry.npmjs.org/@types%2fejs 256ms (cache miss)
+26 silly packumentCache full:https://registry.npmjs.org/@types%2fejs set size:undefined disposed:false
+27 silly fetch manifest @types/nodemailer@^7.0.2
+28 silly packumentCache full:https://registry.npmjs.org/@types%2fnodemailer cache-miss
+29 http fetch GET 200 https://registry.npmjs.org/@types%2fnodemailer 433ms (cache miss)
+30 silly packumentCache full:https://registry.npmjs.org/@types%2fnodemailer set size:undefined disposed:false
+31 silly placeDep ROOT @types/ejs@3.1.5 OK for: movie_rating@1.0.0 want: ^3.1.5
+32 silly placeDep ROOT @types/nodemailer@7.0.11 OK for: movie_rating@1.0.0 want: ^7.0.2
+33 silly placeDep ROOT ejs@3.1.10 OK for: movie_rating@1.0.0 want: ^3.1.10
+34 silly placeDep ROOT nodemailer@7.0.13 OK for: movie_rating@1.0.0 want: ^7.0.10
+35 silly fetch manifest jake@^10.8.5
+36 silly packumentCache full:https://registry.npmjs.org/jake cache-miss
+37 http fetch GET 200 https://registry.npmjs.org/jake 225ms (cache miss)
+38 silly packumentCache full:https://registry.npmjs.org/jake set size:undefined disposed:false
+39 silly placeDep ROOT jake@10.9.4 OK for: ejs@3.1.10 want: ^10.8.5
+40 silly fetch manifest async@^3.2.6
+41 silly packumentCache full:https://registry.npmjs.org/async cache-miss
+42 silly fetch manifest filelist@^1.0.4
+43 silly packumentCache full:https://registry.npmjs.org/filelist cache-miss
+44 silly fetch manifest picocolors@^1.1.1
+45 silly packumentCache full:https://registry.npmjs.org/picocolors cache-miss
+46 http fetch GET 200 https://registry.npmjs.org/filelist 365ms (cache miss)
+47 silly packumentCache full:https://registry.npmjs.org/filelist set size:undefined disposed:false
+48 http fetch GET 200 https://registry.npmjs.org/async 370ms (cache miss)
+49 silly packumentCache full:https://registry.npmjs.org/async set size:undefined disposed:false
+50 http fetch GET 200 https://registry.npmjs.org/picocolors 1379ms (cache miss)
+51 silly packumentCache full:https://registry.npmjs.org/picocolors set size:undefined disposed:false
+52 silly placeDep ROOT async@3.2.6 OK for: jake@10.9.4 want: ^3.2.6
+53 silly placeDep ROOT filelist@1.0.6 OK for: jake@10.9.4 want: ^1.0.4
+54 silly placeDep ROOT picocolors@1.1.1 OK for: jake@10.9.4 want: ^1.1.1
+55 silly fetch manifest minimatch@^5.0.1
+56 silly packumentCache full:https://registry.npmjs.org/minimatch cache-miss
+57 http fetch GET 200 https://registry.npmjs.org/minimatch 314ms (cache miss)
+58 silly packumentCache full:https://registry.npmjs.org/minimatch set size:undefined disposed:false
+59 silly placeDep node_modules/filelist minimatch@5.1.9 OK for: filelist@1.0.6 want: ^5.0.1
+60 silly fetch manifest brace-expansion@^2.0.1
+61 silly packumentCache full:https://registry.npmjs.org/brace-expansion cache-miss
+62 http fetch GET 200 https://registry.npmjs.org/brace-expansion 301ms (cache miss)
+63 silly packumentCache full:https://registry.npmjs.org/brace-expansion set size:undefined disposed:false
+64 silly placeDep node_modules/filelist brace-expansion@2.0.2 OK for: minimatch@5.1.9 want: ^2.0.1
+65 silly reify mark retired [
+65 silly reify   'C:\\Users\\HP\\Desktop\\EasybuyTracker\\node_modules\\node',
+65 silly reify   'C:\\Users\\HP\\Desktop\\EasybuyTracker\\node_modules\\.bin\\node',
+65 silly reify   'C:\\Users\\HP\\Desktop\\EasybuyTracker\\node_modules\\.bin\\node.cmd',
+65 silly reify   'C:\\Users\\HP\\Desktop\\EasybuyTracker\\node_modules\\.bin\\node.ps1'
+65 silly reify ]
+66 silly reify mark retired [
+66 silly reify   'C:\\Users\\HP\\Desktop\\EasybuyTracker\\node_modules\\node-bin-setup'
+66 silly reify ]
+67 silly reify moves {
+67 silly reify   'C:\\Users\\HP\\Desktop\\EasybuyTracker\\node_modules\\node': 'C:\\Users\\HP\\Desktop\\EasybuyTracker\\node_modules\\.node-KJp1X6I6',
+67 silly reify   'C:\\Users\\HP\\Desktop\\EasybuyTracker\\node_modules\\.bin\\node': 'C:\\Users\\HP\\Desktop\\EasybuyTracker\\node_modules\\.bin\\.node-ggPF3jAz',
+67 silly reify   'C:\\Users\\HP\\Desktop\\EasybuyTracker\\node_modules\\.bin\\node.cmd': 'C:\\Users\\HP\\Desktop\\EasybuyTracker\\node_modules\\.bin\\.node.cmd-xfp5DoCA',
+67 silly reify   'C:\\Users\\HP\\Desktop\\EasybuyTracker\\node_modules\\.bin\\node.ps1': 'C:\\Users\\HP\\Desktop\\EasybuyTracker\\node_modules\\.bin\\.node.ps1-wdHm7qUz',
+67 silly reify   'C:\\Users\\HP\\Desktop\\EasybuyTracker\\node_modules\\node-bin-setup': 'C:\\Users\\HP\\Desktop\\EasybuyTracker\\node_modules\\.node-bin-setup-tkcHCn3Y'
+67 silly reify }
+68 silly audit bulk request {
+68 silly audit   '@esbuild/aix-ppc64': [ '0.27.3' ],
+68 silly audit   '@esbuild/android-arm': [ '0.27.3' ],
+68 silly audit   '@esbuild/android-arm64': [ '0.27.3' ],
+68 silly audit   '@esbuild/android-x64': [ '0.27.3' ],
+68 silly audit   '@esbuild/darwin-arm64': [ '0.27.3' ],
+68 silly audit   '@esbuild/darwin-x64': [ '0.27.3' ],
+68 silly audit   '@esbuild/freebsd-arm64': [ '0.27.3' ],
+68 silly audit   '@esbuild/freebsd-x64': [ '0.27.3' ],
+68 silly audit   '@esbuild/linux-arm': [ '0.27.3' ],
+68 silly audit   '@esbuild/linux-arm64': [ '0.27.3' ],
+68 silly audit   '@esbuild/linux-ia32': [ '0.27.3' ],
+68 silly audit   '@esbuild/linux-loong64': [ '0.27.3' ],
+68 silly audit   '@esbuild/linux-mips64el': [ '0.27.3' ],
+68 silly audit   '@esbuild/linux-ppc64': [ '0.27.3' ],
+68 silly audit   '@esbuild/linux-riscv64': [ '0.27.3' ],
+68 silly audit   '@esbuild/linux-s390x': [ '0.27.3' ],
+68 silly audit   '@esbuild/linux-x64': [ '0.27.3' ],
+68 silly audit   '@esbuild/netbsd-arm64': [ '0.27.3' ],
+68 silly audit   '@esbuild/netbsd-x64': [ '0.27.3' ],
+68 silly audit   '@esbuild/openbsd-arm64': [ '0.27.3' ],
+68 silly audit   '@esbuild/openbsd-x64': [ '0.27.3' ],
+68 silly audit   '@esbuild/openharmony-arm64': [ '0.27.3' ],
+68 silly audit   '@esbuild/sunos-x64': [ '0.27.3' ],
+68 silly audit   '@esbuild/win32-arm64': [ '0.27.3' ],
+68 silly audit   '@esbuild/win32-ia32': [ '0.27.3' ],
+68 silly audit   '@esbuild/win32-x64': [ '0.27.3' ],
+68 silly audit   '@mongodb-js/saslprep': [ '1.4.6' ],
+68 silly audit   '@types/bcrypt': [ '6.0.0' ],
+68 silly audit   '@types/body-parser': [ '1.19.6' ],
+68 silly audit   '@types/connect': [ '3.4.38' ],
+68 silly audit   '@types/cors': [ '2.8.19' ],
+68 silly audit   '@types/express': [ '5.0.6' ],
+68 silly audit   '@types/express-serve-static-core': [ '5.1.1' ],
+68 silly audit   '@types/http-errors': [ '2.0.5' ],
+68 silly audit   '@types/jsonwebtoken': [ '9.0.10' ],
+68 silly audit   '@types/ms': [ '2.1.0' ],
+68 silly audit   '@types/multer': [ '2.0.0' ],
+68 silly audit   '@types/node': [ '25.3.0' ],
+68 silly audit   '@types/qs': [ '6.14.0' ],
+68 silly audit   '@types/range-parser': [ '1.2.7' ],
+68 silly audit   '@types/send': [ '1.2.1' ],
+68 silly audit   '@types/serve-static': [ '2.2.0' ],
+68 silly audit   '@types/webidl-conversions': [ '7.0.3' ],
+68 silly audit   '@types/whatwg-url': [ '13.0.0' ],
+68 silly audit   accepts: [ '2.0.0' ],
+68 silly audit   anymatch: [ '3.1.3' ],
+68 silly audit   'append-field': [ '1.0.0' ],
+68 silly audit   'balanced-match': [ '1.0.2' ],
+68 silly audit   bcrypt: [ '6.0.0' ],
+68 silly audit   'binary-extensions': [ '2.3.0' ],
+68 silly audit   'body-parser': [ '2.2.2' ],
+68 silly audit   'brace-expansion': [ '1.1.12', '2.0.2' ],
+68 silly audit   braces: [ '3.0.3' ],
+68 silly audit   bson: [ '7.2.0' ],
+68 silly audit   'buffer-equal-constant-time': [ '1.0.1' ],
+68 silly audit   'buffer-from': [ '1.1.2' ],
+68 silly audit   busboy: [ '1.6.0' ],
+68 silly audit   bytes: [ '3.1.2' ],
+68 silly audit   'call-bind-apply-helpers': [ '1.0.2' ],
+68 silly audit   'call-bound': [ '1.0.4' ],
+68 silly audit   chokidar: [ '3.6.0' ],
+68 silly audit   cloudinary: [ '2.9.0' ],
+68 silly audit   'concat-map': [ '0.0.1' ],
+68 silly audit   'concat-stream': [ '2.0.0' ],
+68 silly audit   'content-disposition': [ '1.0.1' ],
+68 silly audit   'content-type': [ '1.0.5' ],
+68 silly audit   cookie: [ '0.7.2' ],
+68 silly audit   'cookie-signature': [ '1.2.2' ],
+68 silly audit   cors: [ '2.8.6' ],
+68 silly audit   debug: [ '4.4.3' ],
+68 silly audit   depd: [ '2.0.0' ],
+68 silly audit   dotenv: [ '17.3.1' ],
+68 silly audit   'dunder-proto': [ '1.0.1' ],
+68 silly audit   'ecdsa-sig-formatter': [ '1.0.11' ],
+68 silly audit   'ee-first': [ '1.1.1' ],
+68 silly audit   encodeurl: [ '2.0.0' ],
+68 silly audit   'es-define-property': [ '1.0.1' ],
+68 silly audit   'es-errors': [ '1.3.0' ],
+68 silly audit   'es-object-atoms': [ '1.1.1' ],
+68 silly audit   esbuild: [ '0.27.3' ],
+68 silly audit   'escape-html': [ '1.0.3' ],
+68 silly audit   etag: [ '1.8.1' ],
+68 silly audit   express: [ '5.2.1' ],
+68 silly audit   'fill-range': [ '7.1.1' ],
+68 silly audit   finalhandler: [ '2.1.1' ],
+68 silly audit   forwarded: [ '0.2.0' ],
+68 silly audit   fresh: [ '2.0.0' ],
+68 silly audit   fsevents: [ '2.3.3' ],
+68 silly audit   'function-bind': [ '1.1.2' ],
+68 silly audit   'get-intrinsic': [ '1.3.0' ],
+68 silly audit   'get-proto': [ '1.0.1' ],
+68 silly audit   'get-tsconfig': [ '4.13.6' ],
+68 silly audit   'glob-parent': [ '5.1.2' ],
+68 silly audit   gopd: [ '1.2.0' ],
+68 silly audit   'has-flag': [ '3.0.0' ],
+68 silly audit   'has-symbols': [ '1.1.0' ],
+68 silly audit   hasown: [ '2.0.2' ],
+68 silly audit   http: [ '0.0.1-security' ],
+68 silly audit   'http-errors': [ '2.0.1' ],
+68 silly audit   'iconv-lite': [ '0.7.2' ],
+68 silly audit   'ignore-by-default': [ '1.0.1' ],
+68 silly audit   inherits: [ '2.0.4' ],
+68 silly audit   'ipaddr.js': [ '1.9.1' ],
+68 silly audit   'is-binary-path': [ '2.1.0' ],
+68 silly audit   'is-extglob': [ '2.1.1' ],
+68 silly audit   'is-glob': [ '4.0.3' ],
+68 silly audit   'is-number': [ '7.0.0' ],
+68 silly audit   'is-promise': [ '4.0.0' ],
+68 silly audit   jsonwebtoken: [ '9.0.3' ],
+68 silly audit   jwa: [ '2.0.1' ],
+68 silly audit   jws: [ '4.0.1' ],
+68 silly audit   kareem: [ '3.2.0' ],
+68 silly audit   lodash: [ '4.17.23' ],
+68 silly audit   'lodash.includes': [ '4.3.0' ],
+68 silly audit   'lodash.isboolean': [ '3.0.3' ],
+68 silly audit   'lodash.isinteger': [ '4.0.4' ],
+68 silly audit   'lodash.isnumber': [ '3.0.3' ],
+68 silly audit   'lodash.isplainobject': [ '4.0.6' ],
+68 silly audit   'lodash.isstring': [ '4.0.1' ],
+68 silly audit   'lodash.once': [ '4.1.1' ],
+68 silly audit   'math-intrinsics': [ '1.1.0' ],
+68 silly audit   'media-typer': [ '1.1.0', '0.3.0' ],
+68 silly audit   'memory-pager': [ '1.5.0' ],
+68 silly audit   'merge-descriptors': [ '2.0.0' ],
+68 silly audit   'mime-db': [ '1.54.0', '1.52.0' ],
+68 silly audit   'mime-types': [ '3.0.2', '2.1.35' ],
+68 silly audit   minimatch: [ '3.1.2', '5.1.9' ],
+68 silly audit   minimist: [ '1.2.8' ],
+68 silly audit   mkdirp: [ '0.5.6' ],
+68 silly audit   mongodb: [ '7.0.0' ],
+68 silly audit   'mongodb-connection-string-url': [ '7.0.1' ],
+68 silly audit   mongoose: [ '9.2.1' ],
+68 silly audit   mpath: [ '0.9.0' ],
+68 silly audit   mquery: [ '6.0.0' ],
+68 silly audit   ms: [ '2.1.3' ],
+68 silly audit   multer: [ '2.0.2' ],
+68 silly audit   'type-is': [ '1.6.18', '2.0.1' ],
+68 silly audit   negotiator: [ '1.0.0' ],
+68 silly audit   'node-addon-api': [ '8.5.0' ],
+68 silly audit   'node-gyp-build': [ '4.8.4' ],
+68 silly audit   nodemon: [ '3.1.11' ],
+68 silly audit   'normalize-path': [ '3.0.0' ],
+68 silly audit   'object-assign': [ '4.1.1' ],
+68 silly audit   'object-inspect': [ '1.13.4' ],
+68 silly audit   'on-finished': [ '2.4.1' ],
+68 silly audit   once: [ '1.4.0' ],
+68 silly audit   parseurl: [ '1.3.3' ],
+68 silly audit   'path-to-regexp': [ '8.3.0' ],
+68 silly audit   picomatch: [ '2.3.1' ],
+68 silly audit   'proxy-addr': [ '2.0.7' ],
+68 silly audit   'pstree.remy': [ '1.1.8' ],
+68 silly audit   punycode: [ '2.3.1' ],
+68 silly audit   qs: [ '6.15.0' ],
+68 silly audit   'range-parser': [ '1.2.1' ],
+68 silly audit   'raw-body': [ '3.0.2' ],
+68 silly audit   'readable-stream': [ '3.6.2' ],
+68 silly audit   readdirp: [ '3.6.0' ],
+68 silly audit   'resolve-pkg-maps': [ '1.0.0' ],
+68 silly audit   router: [ '2.2.0' ],
+68 silly audit   'safe-buffer': [ '5.2.1' ],
+68 silly audit   'safer-buffer': [ '2.1.2' ],
+68 silly audit   semver: [ '7.7.4' ],
+68 silly audit   send: [ '1.2.1' ],
+68 silly audit   'serve-static': [ '2.2.1' ],
+68 silly audit   setprototypeof: [ '1.2.0' ],
+68 silly audit   'side-channel': [ '1.1.0' ],
+68 silly audit   'side-channel-list': [ '1.0.0' ],
+68 silly audit   'side-channel-map': [ '1.0.1' ],
+68 silly audit   'side-channel-weakmap': [ '1.0.2' ],
+68 silly audit   sift: [ '17.1.3' ],
+68 silly audit   'simple-update-notifier': [ '2.0.0' ],
+68 silly audit   'sparse-bitfield': [ '3.0.3' ],
+68 silly audit   statuses: [ '2.0.2' ],
+68 silly audit   streamsearch: [ '1.1.0' ],
+68 silly audit   string_decoder: [ '1.3.0' ],
+68 silly audit   'supports-color': [ '5.5.0' ],
+68 silly audit   'to-regex-range': [ '5.0.1' ],
+68 silly audit   toidentifier: [ '1.0.1' ],
+68 silly audit   touch: [ '3.1.1' ],
+68 silly audit   tr46: [ '5.1.1' ],
+68 silly audit   tsx: [ '4.21.0' ],
+68 silly audit   typedarray: [ '0.0.6' ],
+68 silly audit   typescript: [ '5.9.3' ],
+68 silly audit   undefsafe: [ '2.0.5' ],
+68 silly audit   'undici-types': [ '7.18.2' ],
+68 silly audit   unpipe: [ '1.0.0' ],
+68 silly audit   'util-deprecate': [ '1.0.2' ],
+68 silly audit   vary: [ '1.1.2' ],
+68 silly audit   'webidl-conversions': [ '7.0.0' ],
+68 silly audit   'whatwg-url': [ '14.2.0' ],
+68 silly audit   wrappy: [ '1.0.2' ],
+68 silly audit   xtend: [ '4.0.2' ],
+68 silly audit   '@types/ejs': [ '3.1.5' ],
+68 silly audit   '@types/nodemailer': [ '7.0.11' ],
+68 silly audit   ejs: [ '3.1.10' ],
+68 silly audit   nodemailer: [ '7.0.13' ],
+68 silly audit   jake: [ '10.9.4' ],
+68 silly audit   async: [ '3.2.6' ],
+68 silly audit   filelist: [ '1.0.6' ],
+68 silly audit   picocolors: [ '1.1.1' ]
+68 silly audit }
+69 verbose reify failed optional dependency C:\Users\HP\Desktop\EasybuyTracker\node_modules\fsevents
+70 silly reify mark deleted [ 'C:\\Users\\HP\\Desktop\\EasybuyTracker\\node_modules\\fsevents' ]
+71 verbose reify failed optional dependency C:\Users\HP\Desktop\EasybuyTracker\node_modules\@esbuild\win32-ia32
+72 silly reify mark deleted [
+72 silly reify   'C:\\Users\\HP\\Desktop\\EasybuyTracker\\node_modules\\@esbuild\\win32-ia32'
+72 silly reify ]
+73 verbose reify failed optional dependency C:\Users\HP\Desktop\EasybuyTracker\node_modules\@esbuild\win32-arm64
+74 silly reify mark deleted [
+74 silly reify   'C:\\Users\\HP\\Desktop\\EasybuyTracker\\node_modules\\@esbuild\\win32-arm64'
+74 silly reify ]
+75 verbose reify failed optional dependency C:\Users\HP\Desktop\EasybuyTracker\node_modules\@esbuild\sunos-x64
+76 silly reify mark deleted [
+76 silly reify   'C:\\Users\\HP\\Desktop\\EasybuyTracker\\node_modules\\@esbuild\\sunos-x64'
+76 silly reify ]
+77 verbose reify failed optional dependency C:\Users\HP\Desktop\EasybuyTracker\node_modules\@esbuild\openharmony-arm64
+78 silly reify mark deleted [
+78 silly reify   'C:\\Users\\HP\\Desktop\\EasybuyTracker\\node_modules\\@esbuild\\openharmony-arm64'
+78 silly reify ]
+79 verbose reify failed optional dependency C:\Users\HP\Desktop\EasybuyTracker\node_modules\@esbuild\openbsd-x64
+80 silly reify mark deleted [
+80 silly reify   'C:\\Users\\HP\\Desktop\\EasybuyTracker\\node_modules\\@esbuild\\openbsd-x64'
+80 silly reify ]
+81 verbose reify failed optional dependency C:\Users\HP\Desktop\EasybuyTracker\node_modules\@esbuild\openbsd-arm64
+82 silly reify mark deleted [
+82 silly reify   'C:\\Users\\HP\\Desktop\\EasybuyTracker\\node_modules\\@esbuild\\openbsd-arm64'
+82 silly reify ]
+83 verbose reify failed optional dependency C:\Users\HP\Desktop\EasybuyTracker\node_modules\@esbuild\netbsd-x64
+84 silly reify mark deleted [
+84 silly reify   'C:\\Users\\HP\\Desktop\\EasybuyTracker\\node_modules\\@esbuild\\netbsd-x64'
+84 silly reify ]
+85 verbose reify failed optional dependency C:\Users\HP\Desktop\EasybuyTracker\node_modules\@esbuild\netbsd-arm64
+86 silly reify mark deleted [
+86 silly reify   'C:\\Users\\HP\\Desktop\\EasybuyTracker\\node_modules\\@esbuild\\netbsd-arm64'
+86 silly reify ]
+87 verbose reify failed optional dependency C:\Users\HP\Desktop\EasybuyTracker\node_modules\@esbuild\linux-x64
+88 silly reify mark deleted [
+88 silly reify   'C:\\Users\\HP\\Desktop\\EasybuyTracker\\node_modules\\@esbuild\\linux-x64'
+88 silly reify ]
+89 verbose reify failed optional dependency C:\Users\HP\Desktop\EasybuyTracker\node_modules\@esbuild\linux-s390x
+90 silly reify mark deleted [
+90 silly reify   'C:\\Users\\HP\\Desktop\\EasybuyTracker\\node_modules\\@esbuild\\linux-s390x'
+90 silly reify ]
+91 verbose reify failed optional dependency C:\Users\HP\Desktop\EasybuyTracker\node_modules\@esbuild\linux-riscv64
+92 silly reify mark deleted [
+92 silly reify   'C:\\Users\\HP\\Desktop\\EasybuyTracker\\node_modules\\@esbuild\\linux-riscv64'
+92 silly reify ]
+93 verbose reify failed optional dependency C:\Users\HP\Desktop\EasybuyTracker\node_modules\@esbuild\linux-ppc64
+94 silly reify mark deleted [
+94 silly reify   'C:\\Users\\HP\\Desktop\\EasybuyTracker\\node_modules\\@esbuild\\linux-ppc64'
+94 silly reify ]
+95 verbose reify failed optional dependency C:\Users\HP\Desktop\EasybuyTracker\node_modules\@esbuild\linux-mips64el
+96 silly reify mark deleted [
+96 silly reify   'C:\\Users\\HP\\Desktop\\EasybuyTracker\\node_modules\\@esbuild\\linux-mips64el'
+96 silly reify ]
+97 verbose reify failed optional dependency C:\Users\HP\Desktop\EasybuyTracker\node_modules\@esbuild\linux-loong64
+98 silly reify mark deleted [
+98 silly reify   'C:\\Users\\HP\\Desktop\\EasybuyTracker\\node_modules\\@esbuild\\linux-loong64'
+98 silly reify ]
+99 verbose reify failed optional dependency C:\Users\HP\Desktop\EasybuyTracker\node_modules\@esbuild\linux-ia32
+100 silly reify mark deleted [
+100 silly reify   'C:\\Users\\HP\\Desktop\\EasybuyTracker\\node_modules\\@esbuild\\linux-ia32'
+100 silly reify ]
+101 verbose reify failed optional dependency C:\Users\HP\Desktop\EasybuyTracker\node_modules\@esbuild\linux-arm64
+102 silly reify mark deleted [
+102 silly reify   'C:\\Users\\HP\\Desktop\\EasybuyTracker\\node_modules\\@esbuild\\linux-arm64'
+102 silly reify ]
+103 verbose reify failed optional dependency C:\Users\HP\Desktop\EasybuyTracker\node_modules\@esbuild\linux-arm
+104 silly reify mark deleted [
+104 silly reify   'C:\\Users\\HP\\Desktop\\EasybuyTracker\\node_modules\\@esbuild\\linux-arm'
+104 silly reify ]
+105 verbose reify failed optional dependency C:\Users\HP\Desktop\EasybuyTracker\node_modules\@esbuild\freebsd-x64
+106 silly reify mark deleted [
+106 silly reify   'C:\\Users\\HP\\Desktop\\EasybuyTracker\\node_modules\\@esbuild\\freebsd-x64'
+106 silly reify ]
+107 verbose reify failed optional dependency C:\Users\HP\Desktop\EasybuyTracker\node_modules\@esbuild\freebsd-arm64
+108 silly reify mark deleted [
+108 silly reify   'C:\\Users\\HP\\Desktop\\EasybuyTracker\\node_modules\\@esbuild\\freebsd-arm64'
+108 silly reify ]
+109 verbose reify failed optional dependency C:\Users\HP\Desktop\EasybuyTracker\node_modules\@esbuild\darwin-x64
+110 silly reify mark deleted [
+110 silly reify   'C:\\Users\\HP\\Desktop\\EasybuyTracker\\node_modules\\@esbuild\\darwin-x64'
+110 silly reify ]
+111 verbose reify failed optional dependency C:\Users\HP\Desktop\EasybuyTracker\node_modules\@esbuild\darwin-arm64
+112 silly reify mark deleted [
+112 silly reify   'C:\\Users\\HP\\Desktop\\EasybuyTracker\\node_modules\\@esbuild\\darwin-arm64'
+112 silly reify ]
+113 verbose reify failed optional dependency C:\Users\HP\Desktop\EasybuyTracker\node_modules\@esbuild\android-x64
+114 silly reify mark deleted [
+114 silly reify   'C:\\Users\\HP\\Desktop\\EasybuyTracker\\node_modules\\@esbuild\\android-x64'
+114 silly reify ]
+115 verbose reify failed optional dependency C:\Users\HP\Desktop\EasybuyTracker\node_modules\@esbuild\android-arm64
+116 silly reify mark deleted [
+116 silly reify   'C:\\Users\\HP\\Desktop\\EasybuyTracker\\node_modules\\@esbuild\\android-arm64'
+116 silly reify ]
+117 verbose reify failed optional dependency C:\Users\HP\Desktop\EasybuyTracker\node_modules\@esbuild\android-arm
+118 silly reify mark deleted [
+118 silly reify   'C:\\Users\\HP\\Desktop\\EasybuyTracker\\node_modules\\@esbuild\\android-arm'
+118 silly reify ]
+119 verbose reify failed optional dependency C:\Users\HP\Desktop\EasybuyTracker\node_modules\@esbuild\aix-ppc64
+120 silly reify mark deleted [
+120 silly reify   'C:\\Users\\HP\\Desktop\\EasybuyTracker\\node_modules\\@esbuild\\aix-ppc64'
+120 silly reify ]
+121 http cache picocolors@https://registry.npmjs.org/picocolors/-/picocolors-1.1.1.tgz 0ms (cache hit)
+122 http cache filelist@https://registry.npmjs.org/filelist/-/filelist-1.0.6.tgz 0ms (cache hit)
+123 http cache @types/nodemailer@https://registry.npmjs.org/@types/nodemailer/-/nodemailer-7.0.11.tgz 0ms (cache hit)
+124 http cache async@https://registry.npmjs.org/async/-/async-3.2.6.tgz 0ms (cache hit)
+125 http cache @types/ejs@https://registry.npmjs.org/@types/ejs/-/ejs-3.1.5.tgz 0ms (cache hit)
+126 http cache jake@https://registry.npmjs.org/jake/-/jake-10.9.4.tgz 0ms (cache hit)
+127 http cache minimatch@https://registry.npmjs.org/minimatch/-/minimatch-5.1.9.tgz 0ms (cache hit)
+128 silly tarball no local data for picocolors@https://registry.npmjs.org/picocolors/-/picocolors-1.1.1.tgz. Extracting by manifest.
+129 silly tarball no local data for filelist@https://registry.npmjs.org/filelist/-/filelist-1.0.6.tgz. Extracting by manifest.
+130 silly tarball no local data for @types/nodemailer@https://registry.npmjs.org/@types/nodemailer/-/nodemailer-7.0.11.tgz. Extracting by manifest.
+131 silly tarball no local data for async@https://registry.npmjs.org/async/-/async-3.2.6.tgz. Extracting by manifest.
+132 silly tarball no local data for @types/ejs@https://registry.npmjs.org/@types/ejs/-/ejs-3.1.5.tgz. Extracting by manifest.
+133 silly tarball no local data for jake@https://registry.npmjs.org/jake/-/jake-10.9.4.tgz. Extracting by manifest.
+134 http cache brace-expansion@https://registry.npmjs.org/brace-expansion/-/brace-expansion-2.0.2.tgz 0ms (cache hit)
+135 silly tarball no local data for minimatch@https://registry.npmjs.org/minimatch/-/minimatch-5.1.9.tgz. Extracting by manifest.
+136 http cache nodemailer@https://registry.npmjs.org/nodemailer/-/nodemailer-7.0.13.tgz 0ms (cache hit)
+137 http cache ejs@https://registry.npmjs.org/ejs/-/ejs-3.1.10.tgz 0ms (cache hit)
+138 silly tarball no local data for brace-expansion@https://registry.npmjs.org/brace-expansion/-/brace-expansion-2.0.2.tgz. Extracting by manifest.
+139 silly tarball no local data for nodemailer@https://registry.npmjs.org/nodemailer/-/nodemailer-7.0.13.tgz. Extracting by manifest.
+140 silly tarball no local data for ejs@https://registry.npmjs.org/ejs/-/ejs-3.1.10.tgz. Extracting by manifest.
+141 http fetch POST 200 https://registry.npmjs.org/-/npm/v1/security/advisories/bulk 533ms
+142 silly audit report {
+142 silly audit report   minimatch: [
+142 silly audit report     {
+142 silly audit report       id: 1113459,
+142 silly audit report       url: 'https://github.com/advisories/GHSA-3ppc-4f35-3m26',
+142 silly audit report       title: 'minimatch has a ReDoS via repeated wildcards with non-matching literal in pattern',
+142 silly audit report       severity: 'high',
+142 silly audit report       vulnerable_versions: '<3.1.3',
+142 silly audit report       cwe: [Array],
+142 silly audit report       cvss: [Object]
+142 silly audit report     },
+142 silly audit report     {
+142 silly audit report       id: 1113538,
+142 silly audit report       url: 'https://github.com/advisories/GHSA-7r86-cg39-jmmj',
+142 silly audit report       title: 'minimatch has ReDoS: matchOne() combinatorial backtracking via multiple non-adjacent GLOBSTAR segments',
+142 silly audit report       severity: 'high',
+142 silly audit report       vulnerable_versions: '<3.1.3',
+142 silly audit report       cwe: [Array],
+142 silly audit report       cvss: [Object]
+142 silly audit report     },
+142 silly audit report     {
+142 silly audit report       id: 1113546,
+142 silly audit report       url: 'https://github.com/advisories/GHSA-23c5-xmqv-rm74',
+142 silly audit report       title: 'minimatch ReDoS: nested *() extglobs generate catastrophically backtracking regular expressions',
+142 silly audit report       severity: 'high',
+142 silly audit report       vulnerable_versions: '<3.1.4',
+142 silly audit report       cwe: [Array],
+142 silly audit report       cvss: [Object]
+142 silly audit report     }
+142 silly audit report   ],
+142 silly audit report   multer: [
+142 silly audit report     {
+142 silly audit report       id: 1113635,
+142 silly audit report       url: 'https://github.com/advisories/GHSA-xf7r-hgr6-v32p',
+142 silly audit report       title: 'Multer vulnerable to Denial of Service via incomplete cleanup',
+142 silly audit report       severity: 'high',
+142 silly audit report       vulnerable_versions: '<2.1.0',
+142 silly audit report       cwe: [Array],
+142 silly audit report       cvss: [Object]
+142 silly audit report     },
+142 silly audit report     {
+142 silly audit report       id: 1113636,
+142 silly audit report       url: 'https://github.com/advisories/GHSA-v52c-386h-88mc',
+142 silly audit report       title: 'Multer vulnerable to Denial of Service via resource exhaustion',
+142 silly audit report       severity: 'high',
+142 silly audit report       vulnerable_versions: '<2.1.0',
+142 silly audit report       cwe: [Array],
+142 silly audit report       cvss: [Object]
+142 silly audit report     }
+142 silly audit report   ]
+142 silly audit report }
+143 silly packumentCache corgi:https://registry.npmjs.org/minimatch cache-miss
+144 silly packumentCache corgi:https://registry.npmjs.org/multer cache-miss
+145 http fetch GET 200 https://registry.npmjs.org/picocolors/-/picocolors-1.1.1.tgz 538ms (cache miss)
+146 http fetch GET 200 https://registry.npmjs.org/filelist/-/filelist-1.0.6.tgz 539ms (cache miss)
+147 http fetch GET 200 https://registry.npmjs.org/multer 214ms (cache miss)
+148 silly packumentCache corgi:https://registry.npmjs.org/multer set size:undefined disposed:false
+149 http fetch GET 200 https://registry.npmjs.org/minimatch 600ms (cache miss)
+150 silly packumentCache corgi:https://registry.npmjs.org/minimatch set size:undefined disposed:false
+151 silly packumentCache corgi:https://registry.npmjs.org/nodemon cache-miss
+152 http fetch GET 200 https://registry.npmjs.org/@types/ejs/-/ejs-3.1.5.tgz 1158ms (cache miss)
+153 http fetch GET 200 https://registry.npmjs.org/brace-expansion/-/brace-expansion-2.0.2.tgz 1350ms (cache miss)
+154 http fetch GET 200 https://registry.npmjs.org/minimatch/-/minimatch-5.1.9.tgz 1377ms (cache miss)
+155 http fetch GET 200 https://registry.npmjs.org/ejs/-/ejs-3.1.10.tgz 1392ms (cache miss)
+156 http fetch GET 200 https://registry.npmjs.org/jake/-/jake-10.9.4.tgz 1579ms (cache miss)
+157 http fetch GET 200 https://registry.npmjs.org/@types/nodemailer/-/nodemailer-7.0.11.tgz 1774ms (cache miss)
+158 http fetch GET 200 https://registry.npmjs.org/nodemon 1228ms (cache miss)
+159 silly packumentCache corgi:https://registry.npmjs.org/nodemon set size:undefined disposed:false
+160 http fetch GET 200 https://registry.npmjs.org/nodemailer/-/nodemailer-7.0.13.tgz 2376ms (cache miss)
+161 http fetch GET 200 https://registry.npmjs.org/async/-/async-3.2.6.tgz 2593ms (cache miss)
+162 silly ADD node_modules/picocolors
+163 silly ADD node_modules/filelist
+164 silly ADD node_modules/filelist/node_modules/brace-expansion
+165 silly ADD node_modules/filelist/node_modules/minimatch
+166 silly ADD node_modules/async
+167 silly ADD node_modules/jake
+168 silly ADD node_modules/nodemailer
+169 silly ADD node_modules/ejs
+170 silly ADD node_modules/@types/nodemailer
+171 silly ADD node_modules/@types/ejs
+172 silly ADD
+173 silly ADD
+174 silly ADD
+175 silly ADD
+176 silly ADD
+177 silly ADD
+178 silly ADD
+179 silly ADD
+180 silly ADD
+181 silly ADD
+182 silly ADD
+183 silly ADD
+184 silly ADD
+185 silly ADD
+186 silly ADD
+187 silly ADD
+188 silly ADD
+189 silly ADD
+190 silly ADD
+191 silly ADD
+192 silly ADD
+193 silly ADD
+194 silly ADD
+195 silly ADD
+196 silly ADD
+197 silly ADD
+198 silly REMOVE node_modules/node-bin-setup
+199 silly REMOVE node_modules/node
+200 verbose cwd C:\Users\HP\Desktop\EasybuyTracker
+201 verbose os Windows_NT 10.0.26200
+202 verbose node v22.15.1
+203 verbose npm  v10.9.2
+204 notice
+204 notice New major version of npm available! 10.9.2 -> 11.11.0
+204 notice Changelog: https://github.com/npm/cli/releases/tag/v11.11.0
+204 notice To update run: npm install -g npm@11.11.0
+204 notice  { force: true, [Symbol(proc-log.meta)]: true }
+205 verbose exit 0
+206 info ok

@@ -5,6 +5,7 @@ import dashboardRouter from "./Router/DashboardRouter.js";
 import receiptRouter from "./Router/ReceiptRouter.js";
 import profileRouter from "./Router/Profilerouter.js";
 import superAdminRouter from "./Router/SuperAdminRouter.js";
+import publicRouter from "./Router/PublicRouter.js";
 
 
 export const MainApp = (app: Application) => {
@@ -20,6 +21,7 @@ export const MainApp = (app: Application) => {
  app.use("/api", dashboardRouter);
  app.use("/api/v1/profile", profileRouter);
  app.use("/api/v1/superadmin", superAdminRouter);
+ app.use("/api/v1/public", publicRouter);
   
 
 

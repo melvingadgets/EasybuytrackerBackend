@@ -4,6 +4,7 @@ import mongoose from "mongoose";
 interface easyboughtitem {
     IphoneModel: string;
     IphoneImageUrl: string;
+    capacity: string;
     Plan:string;
     downPayment:number;
     loanedAmount:number;
@@ -22,6 +23,7 @@ interface Ieasyboughtitem extends easyboughtitem, mongoose.Document { }
 const EasyBoughtItemSchema = new mongoose.Schema({
   IphoneModel: { type: String, required: true },
   IphoneImageUrl: { type: String, required: true },
+  capacity: { type: String, required: true },
  Plan:{type:String,enum:["Monthly","Weekly"],required:true},
   downPayment:{type: Number, required:true},
   loanedAmount:{type: Number, required:true},

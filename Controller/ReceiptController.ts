@@ -10,6 +10,7 @@ const normalizeReason = (value: unknown): string => {
   const trimmed = String(value ?? "").trim();
   return trimmed || "No reason provided";
 };
+const normalizeRequiredReason = (value: unknown): string => String(value ?? "").trim();
 
 const isValidReceiptMimeType = (mimeType: string) => {
   return mimeType.startsWith("image/") || mimeType === "application/pdf";
@@ -115,7 +116,15 @@ export const GetMyReceipts = async (req: Request, res: Response) => {
   try {
     const receipts = await ReceiptModel.find({ user: userId })
       .sort({ createdAt: -1 })
-      .select({ amount: 1, fileUrl: 1, fileType: 1, status: 1, createdAt: 1 })
+      .select({
+        amount: 1,
+        fileUrl: 1,
+        fileType: 1,
+        status: 1,
+        createdAt: 1,
+        rejectedAt: 1,
+        rejectionReason: 1,
+      })
       .lean();
 
     return res.status(200).json({
@@ -184,7 +193,8 @@ export const ApproveReceiptPayment = async (req: Request, res: Response) => {
         return res.status(404).json({ message: "Receipt not found" });
       }
 
-      return res.status(409).json({ message: "Receipt is already approved" });
+      const existingStatus = String(existingReceipt.status || "unknown");
+      return res.status(409).json({ message: `Receipt is already ${existingStatus}` });
     }
 
     const reason = normalizeReason(req.body?.reason);
@@ -215,6 +225,77 @@ export const ApproveReceiptPayment = async (req: Request, res: Response) => {
   } catch (error: any) {
     return res.status(400).json({
       message: "Failed to approve receipt payment",
+      reason: error?.message || "Unknown error",
+    });
+  }
+};
+
+export const RejectReceiptPayment = async (req: Request, res: Response) => {
+  try {
+    const actorId = req.user?._id;
+    const actorRole = req.user?.role;
+    const { receiptId } = req.params;
+    if (!receiptId) {
+      return res.status(400).json({ message: "receiptId is required" });
+    }
+
+    const reason = normalizeRequiredReason(req.body?.reason);
+    if (!reason) {
+      return res.status(400).json({ message: "reason is required to reject a receipt" });
+    }
+
+    const rejectedAt = new Date();
+    const receipt = await ReceiptModel.findOneAndUpdate(
+      { _id: receiptId, status: "pending" },
+      {
+        $set: {
+          status: "rejected",
+          rejectedAt,
+          rejectedBy: actorId || null,
+          rejectionReason: reason,
+        },
+      },
+      { returnDocument: "after" }
+    ).lean();
+
+    if (!receipt) {
+      const existingReceipt = await ReceiptModel.findById(receiptId).select({ _id: 1, status: 1 }).lean();
+      if (!existingReceipt) {
+        return res.status(404).json({ message: "Receipt not found" });
+      }
+
+      const existingStatus = String(existingReceipt.status || "unknown");
+      return res.status(409).json({ message: `Receipt is already ${existingStatus}` });
+    }
+
+    if (actorId && actorRole === "SuperAdmin") {
+      await AuditLogModel.create({
+        actor: actorId,
+        actorRole,
+        action: "RECEIPT_REJECT",
+        targetType: "receipt",
+        targetId: receipt._id,
+        reason,
+        metadata: {
+          receiptAmount: receipt.amount,
+          receiptPlan: receipt.plan,
+          receiptOwner: receipt.user,
+          rejectedAt,
+        },
+      });
+    }
+
+    return res.status(200).json({
+      message: "Receipt rejected successfully",
+      data: {
+        receiptId: receipt._id,
+        receiptStatus: receipt.status,
+        rejectionReason: receipt.rejectionReason,
+      },
+    });
+  } catch (error: any) {
+    return res.status(400).json({
+      message: "Failed to reject receipt payment",
       reason: error?.message || "Unknown error",
     });
   }
