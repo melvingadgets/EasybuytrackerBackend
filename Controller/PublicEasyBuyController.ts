@@ -28,6 +28,7 @@ let catalogCache: {
       imageUrl: string;
       capacities: string[];
       allowedPlans: Array<"Monthly" | "Weekly">;
+      downPaymentPercentage: 40 | 60;
       pricesByCapacity: Record<string, number>;
     }>;
     planRules: typeof EASYBUY_PLAN_RULES;
@@ -155,10 +156,7 @@ const buildSafePublicCatalog = async () => {
     }
 
     return {
-      model: entry.model,
-      imageUrl: entry.imageUrl,
-      capacities: entry.capacities,
-      allowedPlans: entry.allowedPlans,
+      ...entry,
       pricesByCapacity: safePricesByCapacity,
     };
   });
