@@ -42,21 +42,21 @@ const catalog: EasyBuyCatalogEntry[] = [
     imageUrl: "https://fdn2.gsmarena.com/vv/bigpic/apple-iphone-11.jpg",
     capacities: ["64GB", "128GB", "256GB"],
     allowedPlans: ["Weekly"],
-    downPaymentPercentage: 40,
+    downPaymentPercentage: 60,
   },
   {
     model: "iPhone 11 Pro",
     imageUrl: "https://fdn2.gsmarena.com/vv/bigpic/apple-iphone-11-pro.jpg",
     capacities: ["64GB", "256GB", "512GB"],
     allowedPlans: ["Weekly"],
-    downPaymentPercentage: 40,
+    downPaymentPercentage: 60,
   },
   {
     model: "iPhone 11 Pro Max",
     imageUrl: "https://fdn2.gsmarena.com/vv/bigpic/apple-iphone-11-pro-max.jpg",
     capacities: ["64GB", "256GB", "512GB"],
     allowedPlans: ["Weekly"],
-    downPaymentPercentage: 40,
+    downPaymentPercentage: 60,
   },
   {
     model: "iPhone 12",
@@ -70,7 +70,7 @@ const catalog: EasyBuyCatalogEntry[] = [
     imageUrl: "https://fdn2.gsmarena.com/vv/bigpic/apple-iphone-12-mini.jpg",
     capacities: ["64GB", "128GB", "256GB"],
     allowedPlans: ["Weekly"],
-    downPaymentPercentage: 40,
+    downPaymentPercentage: 60,
   },
   {
     model: "iPhone 12 Pro",

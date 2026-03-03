@@ -1,6 +1,7 @@
 import { type Request, type Response } from "express";
 import crypto from "crypto";
 import EasyBuyCapacityPriceModel from "../Model/EasyBuyCapacityPriceModel.js";
+import PublicEasyBuyDraftModel from "../Model/PublicEasyBuyDraftModel.js";
 import PublicEasyBuyRequestModel from "../Model/PublicEasyBuyRequestModel.js";
 import { EASYBUY_CATALOG, EASYBUY_CATALOG_MAP, EASYBUY_PLAN_RULES, normalizeCapacityInput } from "../Utils/EasyBuyCatalog.js";
 import { buildEasyBuyPriceLookup, getModelPricesByCapacity } from "../Utils/EasyBuyPricing.js";
@@ -11,6 +12,8 @@ const RESEND_COOLDOWN_MS = 1000 * 60;
 const MAX_RESEND_COUNT = 8;
 const MAX_SUBMITS_PER_WINDOW = 8;
 const SUBMIT_WINDOW_MS = 1000 * 60 * 15;
+const MAX_DRAFT_SAVES_PER_WINDOW = 25;
+const DRAFT_SAVE_WINDOW_MS = 1000 * 60 * 15;
 const MAX_CATALOG_READS_PER_WINDOW = 80;
 const CATALOG_READ_WINDOW_MS = 1000 * 60;
 const CATALOG_CACHE_TTL_MS = 1000 * 60 * 2;
@@ -19,6 +22,7 @@ const WHATSAPP_NUMBER = "2347086758713";
 const ANONYMOUS_COOKIE_KEY = "easybuy_public_anonymous_id";
 
 const submitRateLimiter = new Map<string, { count: number; windowStart: number }>();
+const draftSaveRateLimiter = new Map<string, { count: number; windowStart: number }>();
 const catalogRateLimiter = new Map<string, { count: number; windowStart: number }>();
 let catalogCache: {
   expiresAt: number;
@@ -174,6 +178,22 @@ const buildSafePublicCatalog = async () => {
   return payload;
 };
 
+type DraftStep = 1 | 2 | 3;
+
+const normalizeDraftStep = (value: unknown): DraftStep | 0 => {
+  const numeric = Number(value);
+  if (numeric === 1 || numeric === 2 || numeric === 3) {
+    return numeric;
+  }
+  return 0;
+};
+
+const normalizePositiveInteger = (value: unknown): number => {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return 0;
+  return Math.floor(numeric);
+};
+
 export const GetPublicEasyBuyCatalog = async (req: Request, res: Response) => {
   const ipAddress = getClientIp(req);
   const limiterKey = `${ipAddress}::${normalizeString(req.headers["user-agent"])}`;
@@ -195,6 +215,160 @@ export const GetPublicEasyBuyCatalog = async (req: Request, res: Response) => {
     console.error("[public-catalog] failed to retrieve public easybuy catalog");
     return res.status(400).json({
       message: "Failed to retrieve catalog",
+    });
+  }
+};
+
+export const SavePublicEasyBuyDraftStep = async (req: Request, res: Response) => {
+  const honeypot = normalizeString((req.body as any)?.website);
+  if (honeypot) {
+    return res.status(200).json({
+      message: "Draft saved",
+    });
+  }
+
+  const ipAddress = getClientIp(req);
+  const limiterKey = `${ipAddress}::${normalizeString(req.headers["user-agent"])}`;
+  if (isRateLimited(limiterKey, draftSaveRateLimiter, MAX_DRAFT_SAVES_PER_WINDOW, DRAFT_SAVE_WINDOW_MS)) {
+    return res.status(429).json({
+      message: "Too many draft save attempts. Please wait and try again.",
+    });
+  }
+
+  try {
+    const step = normalizeDraftStep(req.body?.step);
+    if (!step) {
+      return res.status(400).json({
+        message: "step must be one of 1, 2, or 3",
+      });
+    }
+
+    const anonymousId = ensureAnonymousId(req, res);
+    const fullName = normalizeString(req.body?.fullName);
+    const email = normalizeEmail(req.body?.email);
+    const phone = normalizeString(req.body?.phone);
+    const iphoneModel = normalizeString(req.body?.iphoneModel);
+    const capacity = normalizeCapacityInput(req.body?.capacity);
+    const plan = normalizeString(req.body?.plan) as "Monthly" | "Weekly";
+    const address = normalizeString(req.body?.address);
+    const occupation = normalizeString(req.body?.occupation);
+    const monthlyPlan = normalizePositiveInteger(req.body?.monthlyPlan);
+    const weeklyPlan = normalizePositiveInteger(req.body?.weeklyPlan);
+
+    const updatePayload: Record<string, unknown> = {
+      currentStep: step,
+      status: "draft",
+      ipAddress,
+      userAgent: normalizeString(req.headers["user-agent"]),
+      referrer: normalizeString(req.body?.referrer || req.headers.referer),
+      landingPage: normalizeString(req.body?.landingPage),
+      utmSource: normalizeString(req.body?.utmSource),
+      utmMedium: normalizeString(req.body?.utmMedium),
+      utmCampaign: normalizeString(req.body?.utmCampaign),
+      utmTerm: normalizeString(req.body?.utmTerm),
+      utmContent: normalizeString(req.body?.utmContent),
+    };
+    const unsetPayload: Record<string, "" | 1> = {};
+
+    if (fullName) updatePayload.fullName = fullName;
+    if (email) updatePayload.email = email;
+    if (phone) updatePayload.phone = phone;
+    if (iphoneModel) updatePayload.iphoneModel = iphoneModel;
+    if (capacity) updatePayload.capacity = capacity;
+    if (plan) updatePayload.plan = plan;
+    if (address) updatePayload.address = address;
+    if (occupation) updatePayload.occupation = occupation;
+
+    if (step === 1) {
+      if (!fullName || !email || !phone) {
+        return res.status(400).json({
+          message: "fullName, email, and phone are required for step 1",
+        });
+      }
+    }
+
+    if (step === 2) {
+      if (!iphoneModel || !capacity || !plan) {
+        return res.status(400).json({
+          message: "iphoneModel, capacity, and plan are required for step 2",
+        });
+      }
+
+      const catalogEntry = EASYBUY_CATALOG_MAP.get(iphoneModel);
+      if (!catalogEntry) {
+        return res.status(400).json({
+          message: "Unsupported iPhone model",
+        });
+      }
+
+      if (!catalogEntry.capacities.includes(capacity)) {
+        return res.status(400).json({
+          message: `Capacity ${capacity} is unavailable for ${iphoneModel}`,
+        });
+      }
+
+      if (!catalogEntry.allowedPlans.includes(plan)) {
+        return res.status(400).json({
+          message: `Plan must be one of: ${catalogEntry.allowedPlans.join(", ")}`,
+        });
+      }
+
+      if (plan === "Monthly") {
+        if (!monthlyPlan || !EASYBUY_PLAN_RULES.monthlyDurations.includes(monthlyPlan)) {
+          return res.status(400).json({
+            message: "A valid monthlyPlan is required for Monthly plan",
+          });
+        }
+        updatePayload.monthlyPlan = monthlyPlan;
+        unsetPayload.weeklyPlan = "";
+      } else {
+        if (!weeklyPlan || !EASYBUY_PLAN_RULES.weeklyDurations.includes(weeklyPlan)) {
+          return res.status(400).json({
+            message: "A valid weeklyPlan is required for Weekly plan",
+          });
+        }
+        updatePayload.weeklyPlan = weeklyPlan;
+        unsetPayload.monthlyPlan = "";
+      }
+    }
+
+    if (step === 3) {
+      if (!address || !occupation) {
+        return res.status(400).json({
+          message: "address and occupation are required for step 3",
+        });
+      }
+    }
+
+    const updateQuery: Record<string, unknown> = {
+      $set: updatePayload,
+    };
+
+    if (Object.keys(unsetPayload).length) {
+      updateQuery.$unset = unsetPayload;
+    }
+
+    const saved = await PublicEasyBuyDraftModel.findOneAndUpdate(
+      { anonymousId },
+      updateQuery,
+      {
+        upsert: true,
+        new: true,
+      }
+    ).lean();
+
+    return res.status(200).json({
+      message: "Draft step saved",
+      data: {
+        anonymousId,
+        currentStep: saved?.currentStep || step,
+        status: saved?.status || "draft",
+      },
+    });
+  } catch (error: any) {
+    return res.status(400).json({
+      message: "Failed to save draft step",
+      reason: error?.message || "Unknown error",
     });
   }
 };
@@ -296,6 +470,15 @@ export const CreatePublicEasyBuyRequest = async (req: Request, res: Response) =>
       verificationTokenExpiresAt: expiresAt,
       resendCount: 0,
     });
+
+    try {
+      await PublicEasyBuyDraftModel.deleteOne({ anonymousId });
+    } catch (draftCleanupError: any) {
+      console.error("[public-request] created request but failed to delete draft", {
+        anonymousId,
+        error: draftCleanupError?.message || "Unknown cleanup error",
+      });
+    }
 
     const verifyUrl = buildVerificationUrl(verificationToken);
     try {

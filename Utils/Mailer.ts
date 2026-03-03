@@ -1,8 +1,10 @@
 import { renderEmailTemplate } from "./EmailTemplates.js";
 import { config } from "../config/Config.js";
 
-const gmailUser = config.mail.gmailUser;
-const gmailAppPassword = config.mail.gmailAppPassword;
+const mailProvider = config.mail.provider;
+const gmailUser = config.mail.smtp.gmailUser;
+const gmailAppPassword = config.mail.smtp.gmailAppPassword;
+const resendApiKey = config.mail.resend.apiKey;
 const mailFrom = config.mail.mailFrom;
 
 type TransportSlot = "gmail465" | "gmail587";
@@ -78,6 +80,36 @@ const describeError = (error: any) => {
     .join(" | ");
 };
 
+const sendWithResendApi = async (mailOptions: { from: string; to: string; subject: string; html: string }) => {
+  if (!resendApiKey) {
+    throw new Error("Email transport is not configured. Set RESEND_API_KEY.");
+  }
+
+  let response: Response;
+  try {
+    response = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${resendApiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        from: mailOptions.from,
+        to: [mailOptions.to],
+        subject: mailOptions.subject,
+        html: mailOptions.html,
+      }),
+    });
+  } catch (error: any) {
+    throw new Error(`Resend API network error: ${describeError(error)}`);
+  }
+
+  if (!response.ok) {
+    const errorBody = String(await response.text()).slice(0, 500);
+    throw new Error(`Resend API request failed (status=${response.status}): ${errorBody}`);
+  }
+};
+
 const sendWithFallback = async (mailOptions: { from: string; to: string; subject: string; html: string }) => {
   const attempts: Array<{ slot: TransportSlot; error: string }> = [];
   const order: TransportSlot[] = ["gmail465", "gmail587"];
@@ -112,7 +144,7 @@ export const sendEasyBuyVerificationEmail = async (payload: {
   plan: "Monthly" | "Weekly";
 }) => {
   if (!mailFrom) {
-    throw new Error("MAIL_FROM or GMAIL_USER must be set for outbound email");
+    throw new Error("MAIL_FROM must be set for outbound email");
   }
 
   const html = await renderEmailTemplate("easybuy-request-verify.ejs", {
@@ -124,10 +156,17 @@ export const sendEasyBuyVerificationEmail = async (payload: {
     plan: payload.plan,
   });
 
-  await sendWithFallback({
+  const mailOptions = {
     from: mailFrom,
     to: payload.to,
     subject: `Verify your EasyBuy request (${payload.requestId})`,
     html,
-  });
+  };
+
+  if (mailProvider === "resend") {
+    await sendWithResendApi(mailOptions);
+    return;
+  }
+
+  await sendWithFallback(mailOptions);
 };
