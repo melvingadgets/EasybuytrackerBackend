@@ -203,28 +203,28 @@ const catalog: EasyBuyCatalogEntry[] = [
     imageUrl:
       "https://www.apple.com/v/iphone-17/d/images/overview/highlights/cameras/cameras__c52mawt2c282_large.png",
     capacities: ["256GB", "512GB"],
-    allowedPlans: ["Weekly", "Monthly"],
+    allowedPlans: ["Weekly"],
     downPaymentPercentage: 60,
   },
   {
     model: "iPhone 17 Air",
     imageUrl: "https://fdn2.gsmarena.com/vv/bigpic/apple-iphone-air.jpg",
     capacities: ["256GB", "512GB", "1TB"],
-    allowedPlans: ["Weekly", "Monthly"],
+    allowedPlans: ["Weekly"],
     downPaymentPercentage: 60,
   },
   {
     model: "iPhone 17 Pro",
     imageUrl: "https://fdn2.gsmarena.com/vv/bigpic/apple-iphone-17-pro.jpg",
     capacities: ["256GB", "512GB", "1TB"],
-    allowedPlans: ["Weekly", "Monthly"],
+    allowedPlans: ["Weekly"],
     downPaymentPercentage: 60,
   },
   {
     model: "iPhone 17 Pro Max",
     imageUrl: "https://fdn2.gsmarena.com/vv/bigpic/apple-iphone-17-pro-max.jpg",
     capacities: ["256GB", "512GB", "1TB", "2TB"],
-    allowedPlans: ["Weekly", "Monthly"],
+    allowedPlans: ["Weekly"],
     downPaymentPercentage: 60,
   },
 ];
