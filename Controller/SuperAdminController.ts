@@ -6,6 +6,7 @@ import EasyBuyPlanModel from "../Model/EasyBuyPlanModel.js";
 import EasyBuyCapacityPriceModel from "../Model/EasyBuyCapacityPriceModel.js";
 import PaymentModel from "../Model/PaymentModel.js";
 import ProfileModel from "../Model/Profilemodel.js";
+import PublicEasyBuyDraftModel from "../Model/PublicEasyBuyDraftModel.js";
 import PublicEasyBuyRequestModel from "../Model/PublicEasyBuyRequestModel.js";
 import ReceiptModel from "../Model/ReceiptModel.js";
 import SessionModel from "../Model/SessionModel.js";
@@ -757,6 +758,76 @@ export const SuperAdminListPublicEasyBuyRequests = async (req: Request, res: Res
   }
 };
 
+export const SuperAdminListAbandonedPublicEasyBuyDrafts = async (req: Request, res: Response) => {
+  try {
+    const search = normalizeString(req.query?.search);
+    const safeSearch = search ? escapeRegExp(search) : "";
+    const page = Math.max(Number(req.query?.page) || 1, 1);
+    const limit = Math.min(Math.max(Number(req.query?.limit) || 20, 1), 100);
+    const inactivityMinutesRaw = Number(req.query?.inactivityMinutes);
+    const inactivityMinutes = Number.isFinite(inactivityMinutesRaw)
+      ? Math.min(Math.max(Math.floor(inactivityMinutesRaw), 5), 60 * 24 * 30)
+      : 30;
+    const abandonedBefore = new Date(Date.now() - inactivityMinutes * 60 * 1000);
+
+    const filter: Record<string, unknown> = {
+      status: "draft",
+      updatedAt: { $lte: abandonedBefore },
+    };
+    if (safeSearch) {
+      filter.$or = [
+        { fullName: { $regex: safeSearch, $options: "i" } },
+        { email: { $regex: safeSearch, $options: "i" } },
+        { phone: { $regex: safeSearch, $options: "i" } },
+        { iphoneModel: { $regex: safeSearch, $options: "i" } },
+        { capacity: { $regex: safeSearch, $options: "i" } },
+      ];
+    }
+
+    const [items, total] = await Promise.all([
+      PublicEasyBuyDraftModel.find(filter)
+        .sort({ updatedAt: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .select({
+          _id: 0,
+          anonymousId: 1,
+          fullName: 1,
+          email: 1,
+          phone: 1,
+          iphoneModel: 1,
+          capacity: 1,
+          plan: 1,
+          currentStep: 1,
+          updatedAt: 1,
+          createdAt: 1,
+        })
+        .lean(),
+      PublicEasyBuyDraftModel.countDocuments(filter),
+    ]);
+
+    return res.status(200).json({
+      message: "Abandoned public EasyBuy drafts retrieved successfully",
+      data: items,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.max(Math.ceil(total / limit), 1),
+      },
+      meta: {
+        inactivityMinutes,
+        abandonedBefore,
+      },
+    });
+  } catch (error: any) {
+    return res.status(400).json({
+      message: "Failed to retrieve abandoned public EasyBuy drafts",
+      reason: error?.message || "Unknown error",
+    });
+  }
+};
+
 export const SuperAdminApprovePublicEasyBuyRequest = async (req: Request, res: Response) => {
   const actorId = req.user?._id;
   const actorRole = req.user?.role;
@@ -773,7 +844,7 @@ export const SuperAdminApprovePublicEasyBuyRequest = async (req: Request, res: R
 
   try {
     const updated = await PublicEasyBuyRequestModel.findOneAndUpdate(
-      { requestId, status: { $in: ["verified"] } },
+      { requestId, status: { $in: ["verified", "pending_verification"] } },
       {
         $set: {
           status: "approved",

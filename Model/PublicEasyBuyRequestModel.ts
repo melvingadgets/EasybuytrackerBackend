@@ -89,7 +89,7 @@ const PublicEasyBuyRequestSchema = new mongoose.Schema<PublicEasyBuyRequest>(
     status: {
       type: String,
       enum: ["pending_verification", "verified", "approved", "rejected", "converted"],
-      default: "pending_verification",
+      default: "verified",
       index: true,
     },
     anonymousId: {

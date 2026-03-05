@@ -215,8 +215,7 @@ const catalog: EasyBuyCatalogEntry[] = [
   },
   {
     model: "iPhone 17 Pro",
-    imageUrl:
-      "https://www.apple.com/v/iphone-17-pro/d/images/overview/highlights/camera/camera__by44zzv2fw7m_large_2x.png",
+    imageUrl: "https://fdn2.gsmarena.com/vv/bigpic/apple-iphone-17-pro.jpg",
     capacities: ["256GB", "512GB", "1TB"],
     allowedPlans: ["Weekly", "Monthly"],
     downPaymentPercentage: 60,

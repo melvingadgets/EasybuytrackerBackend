@@ -5,11 +5,7 @@ import PublicEasyBuyDraftModel from "../Model/PublicEasyBuyDraftModel.js";
 import PublicEasyBuyRequestModel from "../Model/PublicEasyBuyRequestModel.js";
 import { EASYBUY_CATALOG, EASYBUY_CATALOG_MAP, EASYBUY_PLAN_RULES, normalizeCapacityInput } from "../Utils/EasyBuyCatalog.js";
 import { buildEasyBuyPriceLookup, getModelPricesByCapacity } from "../Utils/EasyBuyPricing.js";
-import { sendEasyBuyVerificationEmail } from "../Utils/Mailer.js";
 
-const VERIFY_TOKEN_TTL_MS = 1000 * 60 * 30;
-const RESEND_COOLDOWN_MS = 1000 * 60;
-const MAX_RESEND_COUNT = 8;
 const MAX_SUBMITS_PER_WINDOW = 8;
 const SUBMIT_WINDOW_MS = 1000 * 60 * 15;
 const MAX_DRAFT_SAVES_PER_WINDOW = 25;
@@ -20,6 +16,8 @@ const CATALOG_CACHE_TTL_MS = 1000 * 60 * 2;
 
 const WHATSAPP_NUMBER = "2347086758713";
 const ANONYMOUS_COOKIE_KEY = "easybuy_public_anonymous_id";
+const VERIFICATION_DISABLED_MESSAGE =
+  "Email verification is currently disabled. Your request is already queued for admin review.";
 
 const submitRateLimiter = new Map<string, { count: number; windowStart: number }>();
 const draftSaveRateLimiter = new Map<string, { count: number; windowStart: number }>();
@@ -83,23 +81,6 @@ const ensureAnonymousId = (req: Request, res: Response): string => {
   return resolved;
 };
 
-const buildVerifyToken = () => {
-  const raw = crypto.randomBytes(32).toString("hex");
-  const hash = crypto.createHash("sha256").update(raw).digest("hex");
-  const expiresAt = new Date(Date.now() + VERIFY_TOKEN_TTL_MS);
-  return { raw, hash, expiresAt };
-};
-
-const getPublicAppBaseUrl = () => {
-  const configured =
-    normalizeString(process.env.PUBLIC_APP_BASE_URL) ||
-    normalizeString(process.env.APP_PUBLIC_BASE_URL);
-  return configured.replace(/\/+$/, "");
-};
-
-const buildVerificationUrl = (token: string) =>
-  `${getPublicAppBaseUrl()}/apply/verify?token=${encodeURIComponent(token)}`;
-
 const buildWhatsAppUrl = (params: {
   fullName: string;
   email: string;
@@ -109,7 +90,7 @@ const buildWhatsAppUrl = (params: {
   plan: "Monthly" | "Weekly";
 }) => {
   const message = [
-    "Hello Admin, I have verified my EasyBuy request.",
+    "Hello Admin, I have submitted my EasyBuy request.",
     `Name: ${params.fullName}`,
     `Email: ${params.email}`,
     `Phone: ${params.phone}`,
@@ -353,7 +334,7 @@ export const SavePublicEasyBuyDraftStep = async (req: Request, res: Response) =>
       updateQuery,
       {
         upsert: true,
-        new: true,
+        returnDocument: "after",
       }
     ).lean();
 
@@ -431,8 +412,7 @@ export const CreatePublicEasyBuyRequest = async (req: Request, res: Response) =>
 
     if (existingOpenRequest) {
       return res.status(409).json({
-        message:
-          "You already have an active request for this device. Use resend verification email or contact support.",
+        message: "You already have an active request for this device. Contact support for assistance.",
         data: {
           requestId: existingOpenRequest.requestId,
           status: existingOpenRequest.status,
@@ -440,7 +420,6 @@ export const CreatePublicEasyBuyRequest = async (req: Request, res: Response) =>
       });
     }
 
-    const { raw: verificationToken, hash: verificationTokenHash, expiresAt } = buildVerifyToken();
     const requestId = `EBR-${Date.now().toString(36).toUpperCase()}-${crypto
       .randomBytes(3)
       .toString("hex")
@@ -455,7 +434,8 @@ export const CreatePublicEasyBuyRequest = async (req: Request, res: Response) =>
       iphoneModel,
       capacity,
       plan,
-      status: "pending_verification",
+      status: "verified",
+      verifiedAt: new Date(),
       anonymousId,
       ipAddress,
       userAgent: normalizeString(req.headers["user-agent"]),
@@ -466,9 +446,6 @@ export const CreatePublicEasyBuyRequest = async (req: Request, res: Response) =>
       utmCampaign: normalizeString(req.body?.utmCampaign),
       utmTerm: normalizeString(req.body?.utmTerm),
       utmContent: normalizeString(req.body?.utmContent),
-      verificationTokenHash,
-      verificationTokenExpiresAt: expiresAt,
-      resendCount: 0,
     });
 
     try {
@@ -480,50 +457,13 @@ export const CreatePublicEasyBuyRequest = async (req: Request, res: Response) =>
       });
     }
 
-    const verifyUrl = buildVerificationUrl(verificationToken);
-    try {
-      await sendEasyBuyVerificationEmail({
-        to: email,
-        fullName,
-        verifyUrl,
+    return res.status(201).json({
+      message: "Request submitted successfully. An admin will contact you soon.",
+      data: {
         requestId: created.requestId,
-        iphoneModel,
-        capacity,
-        plan,
-      });
-
-      await PublicEasyBuyRequestModel.updateOne(
-        { _id: created._id },
-        {
-          $set: {
-            lastVerificationSentAt: new Date(),
-          },
-        }
-      );
-
-      return res.status(201).json({
-        message: "Request submitted. Please verify your email to continue.",
-        data: {
-          requestId: created.requestId,
-          status: created.status,
-        },
-      });
-    } catch (emailError: any) {
-      console.error("[public-request] request created but verification email failed", {
-        requestId: created.requestId,
-        error: emailError?.message || "Unknown mail error",
-      });
-
-      return res.status(202).json({
-        message:
-          "Request saved, but verification email could not be sent right now. Use resend verification email.",
-        data: {
-          requestId: created.requestId,
-          status: created.status,
-          emailDelivery: "failed",
-        },
-      });
-    }
+        status: created.status,
+      },
+    });
   } catch (error: any) {
     return res.status(400).json({
       message: "Failed to submit request",
@@ -532,93 +472,14 @@ export const CreatePublicEasyBuyRequest = async (req: Request, res: Response) =>
   }
 };
 
-export const ResendPublicEasyBuyVerification = async (req: Request, res: Response) => {
+export const ResendPublicEasyBuyVerification = async (_req: Request, res: Response) => {
   try {
-    const requestId = normalizeString(req.body?.requestId);
-    const email = normalizeEmail(req.body?.email);
-
-    if (!requestId && !email) {
-      return res.status(400).json({
-        message: "requestId or email is required",
-      });
-    }
-
-    const query = requestId ? { requestId } : { email };
-    const existing = await PublicEasyBuyRequestModel.findOne(query)
-      .sort({ createdAt: -1 })
-      .lean();
-
-    if (!existing) {
-      return res.status(200).json({
-        message: "If a request exists, a verification email has been sent.",
-      });
-    }
-
-    if (existing.status !== "pending_verification") {
-      return res.status(200).json({
-        message: "Email is already verified or request is no longer awaiting verification.",
-        data: {
-          requestId: existing.requestId,
-          status: existing.status,
-        },
-      });
-    }
-
-    const lastSent = existing.lastVerificationSentAt
-      ? new Date(existing.lastVerificationSentAt).getTime()
-      : 0;
-    const now = Date.now();
-    const elapsed = now - lastSent;
-
-    if (elapsed < RESEND_COOLDOWN_MS) {
-      return res.status(429).json({
-        message: "Please wait before requesting another verification email.",
-        data: {
-          retryAfterSeconds: Math.ceil((RESEND_COOLDOWN_MS - elapsed) / 1000),
-        },
-      });
-    }
-
-    if (Number(existing.resendCount || 0) >= MAX_RESEND_COUNT) {
-      return res.status(429).json({
-        message: "Verification resend limit reached. Please contact support.",
-      });
-    }
-
-    const token = buildVerifyToken();
-    await PublicEasyBuyRequestModel.updateOne(
-      { _id: existing._id },
-      {
-        $set: {
-          verificationTokenHash: token.hash,
-          verificationTokenExpiresAt: token.expiresAt,
-          lastVerificationSentAt: new Date(),
-        },
-        $inc: {
-          resendCount: 1,
-        },
-      }
-    );
-
-    await sendEasyBuyVerificationEmail({
-      to: existing.email,
-      fullName: existing.fullName,
-      verifyUrl: buildVerificationUrl(token.raw),
-      requestId: existing.requestId,
-      iphoneModel: existing.iphoneModel,
-      capacity: existing.capacity,
-      plan: existing.plan,
-    });
-
     return res.status(200).json({
-      message: "Verification email sent",
-      data: {
-        requestId: existing.requestId,
-      },
+      message: VERIFICATION_DISABLED_MESSAGE,
     });
   } catch (error: any) {
     return res.status(400).json({
-      message: "Failed to resend verification email",
+      message: "Failed to process request",
       reason: error?.message || "Unknown error",
     });
   }
@@ -628,8 +489,8 @@ export const VerifyPublicEasyBuyRequest = async (req: Request, res: Response) =>
   try {
     const token = normalizeString(req.query?.token);
     if (!token) {
-      return res.status(400).json({
-        message: "Verification token is required",
+      return res.status(200).json({
+        message: VERIFICATION_DISABLED_MESSAGE,
       });
     }
 
@@ -639,53 +500,31 @@ export const VerifyPublicEasyBuyRequest = async (req: Request, res: Response) =>
     }).lean();
 
     if (!request) {
-      return res.status(400).json({
-        message: "Invalid or expired verification token",
-      });
-    }
-
-    if (request.status !== "pending_verification") {
       return res.status(200).json({
-        message: "Request already verified",
-        data: {
-          requestId: request.requestId,
-          status: request.status,
-          whatsappUrl: buildWhatsAppUrl({
-            fullName: request.fullName,
-            email: request.email,
-            phone: request.phone,
-            iphoneModel: request.iphoneModel,
-            capacity: request.capacity,
-            plan: request.plan,
-          }),
-        },
+        message: VERIFICATION_DISABLED_MESSAGE,
       });
     }
 
-    const isExpired =
-      !request.verificationTokenExpiresAt ||
-      new Date(request.verificationTokenExpiresAt).getTime() < Date.now();
-    if (isExpired) {
-      return res.status(400).json({
-        message: "Verification token expired. Please request another verification email.",
-      });
-    }
+    let status = request.status;
 
-    await PublicEasyBuyRequestModel.updateOne(
-      { _id: request._id, status: "pending_verification" },
-      {
-        $set: {
-          status: "verified",
-          verifiedAt: new Date(),
-        },
-      }
-    );
+    if (request.status === "pending_verification") {
+      await PublicEasyBuyRequestModel.updateOne(
+        { _id: request._id, status: "pending_verification" },
+        {
+          $set: {
+            status: "verified",
+            verifiedAt: new Date(),
+          },
+        }
+      );
+      status = "verified";
+    }
 
     return res.status(200).json({
-      message: "Email verified successfully",
+      message: VERIFICATION_DISABLED_MESSAGE,
       data: {
         requestId: request.requestId,
-        status: "verified",
+        status,
         whatsappUrl: buildWhatsAppUrl({
           fullName: request.fullName,
           email: request.email,
