@@ -1,15 +1,25 @@
 import UserModel from "../Model/UserModel.js";
 import {type Response, type Request} from "express";
-import bcrypt from "bcrypt";
-import jwt from "jsonwebtoken";
-import { randomUUID } from "crypto";
 import EasyBoughtItemModel from "../Model/EasyBoughtitem.js";
 import EasyBuyCapacityPriceModel from "../Model/EasyBuyCapacityPriceModel.js";
 import mongoose from "mongoose";
-import SessionModel from "../Model/SessionModel.js";
-import { EASYBUY_CATALOG, EASYBUY_CATALOG_MAP, EASYBUY_PLAN_RULES, normalizeCapacityInput } from "../Utils/EasyBuyCatalog.js";
-import { buildEasyBuyPriceLookup, getModelPricesByCapacity } from "../Utils/EasyBuyPricing.js";
-import { config } from "../config/Config.js";
+import {
+  appendPricingProviderFilter,
+  getReadProvider,
+  getWriteProvider,
+  sortPricingDocsByProviderPrecedence,
+} from "../Utils/providers/helpers.js";
+import { getDefaultProvider } from "../Utils/providers/registry.js";
+import type { CatalogEntry, FinanceProvider } from "../Utils/providers/types.js";
+import {
+  createAuthUser,
+  findAuthUserByEmail,
+  getAuthMe,
+  listAuthUsers,
+  loginWithAuthService,
+  logoutWithAuthService,
+  syncLocalShadowUser,
+} from "../Service/AuthService.js";
 
 const PROXIED_CATALOG_IMAGE_MODELS = new Set([
   "iPhone 17",
@@ -38,6 +48,8 @@ const GSM_ARENA_17_IMAGE_CANDIDATES: Record<string, string[]> = {
   ],
 };
 
+const DEFAULT_PROVIDER = getDefaultProvider();
+
 const getRequestBaseUrl = (req: Request): string => {
   const forwardedProto = (String(req.get("x-forwarded-proto") || "").split(",")[0] || "").trim();
   const forwardedHost = (String(req.get("x-forwarded-host") || "").split(",")[0] || "").trim();
@@ -46,18 +58,24 @@ const getRequestBaseUrl = (req: Request): string => {
   return `${protocol}://${host}`;
 };
 
-const buildCatalogImageProxyUrl = (req: Request, model: string): string =>
-  `${getRequestBaseUrl(req)}/api/v1/user/easybuy-catalog-image/${encodeURIComponent(model)}`;
+const buildCatalogImageProxyUrl = (req: Request, provider: FinanceProvider, model: string): string =>
+  `${getRequestBaseUrl(req)}/api/v1/user/easybuy-catalog-image/${encodeURIComponent(
+    model
+  )}?provider=${encodeURIComponent(provider.slug)}`;
 
-const shouldProxyCatalogImage = (model: string): boolean => PROXIED_CATALOG_IMAGE_MODELS.has(model);
+const shouldProxyCatalogImage = (provider: FinanceProvider, model: string): boolean =>
+  provider.slug === DEFAULT_PROVIDER.slug && PROXIED_CATALOG_IMAGE_MODELS.has(model);
 
 const resolveCatalogImageUrl = (
   req: Request,
-  entry: (typeof EASYBUY_CATALOG)[number]
-): string => (shouldProxyCatalogImage(entry.model) ? buildCatalogImageProxyUrl(req, entry.model) : entry.imageUrl);
+  provider: FinanceProvider,
+  entry: CatalogEntry
+): string => (shouldProxyCatalogImage(provider, entry.model) ? buildCatalogImageProxyUrl(req, provider, entry.model) : entry.imageUrl);
 
-const getCatalogImageFetchCandidates = (entry: (typeof EASYBUY_CATALOG)[number]): string[] => {
-  const candidates = [entry.imageUrl, ...(GSM_ARENA_17_IMAGE_CANDIDATES[entry.model] || [])];
+const getCatalogImageFetchCandidates = (provider: FinanceProvider, entry: CatalogEntry): string[] => {
+  const providerCandidates =
+    provider.slug === DEFAULT_PROVIDER.slug ? GSM_ARENA_17_IMAGE_CANDIDATES[entry.model] || [] : [];
+  const candidates = [entry.imageUrl, ...providerCandidates];
   return Array.from(new Set(candidates));
 };
 
@@ -99,35 +117,32 @@ export const CreateAdmin = async (req: Request, res: Response) => {
         message: "All fields required",
       });
     }
-    const CheckEmail = await UserModel.findOne({ email: email });
-    if (CheckEmail) {
-      return res.status(401).json({
-        message: "Email Already in use",
-      });
-    }
-    if (Password.length < 8) {
-      return res.status(401).json({
-        message: "password must not be less than eight characters",
-      });
+    const authToken = req.authToken;
+    if (!authToken) {
+      return res.status(401).json({ message: "Access denied" });
     }
 
-    const salt = await bcrypt.genSalt(10);
-    const HashedPassword = await bcrypt.hash(Password, salt);
-    const UserData = await UserModel.create({
+    const created = await createAuthUser(authToken, {
+      email: String(email).toLowerCase(),
+      password: String(Password),
       fullName: normalizedFullName,
-      email: email,
-      password: HashedPassword,
       role: "Admin",
     });
+    const authUser = created.data?.user;
+    if (!authUser) {
+      return res.status(400).json({ message: "unable to create user" });
+    }
+
+    const UserData = await syncLocalShadowUser(authUser);
 
  return res.status(200).json({
       message: "registration was successful",
       success: 1,
       Result: {
-        _id: UserData._id,
-        fullName: UserData.fullName,
-        email: UserData.email,
-        role: UserData.role,
+        _id: UserData?._id || authUser._id,
+        fullName: UserData?.fullName || authUser.fullName,
+        email: UserData?.email || authUser.email,
+        role: UserData?.role || "Admin",
       },
     });
      } catch (error: any) {
@@ -143,66 +158,23 @@ export const LoginUser = async (
 ): Promise<Response> => {
   try {
     const { email, password } = req.body;
-    const checkEmail = await UserModel.findOne({ email: email }).select("+password").lean();
-
-    if (checkEmail) {
-      const CheckPassword = await bcrypt.compare(password, String(checkEmail.password));
-
-      if (CheckPassword) {
-        if (checkEmail) {
-          const jti = randomUUID();
-          const token = jwt.sign(
-            {
-              _id: checkEmail?._id,
-              userName: checkEmail.fullName,
-              role: checkEmail.role,
-              email: checkEmail.email,
-              jti,
-            },
-            config.jwtSecret,
-            { expiresIn: "40m" }
-          );
-          const decodedToken = jwt.decode(token) as jwt.JwtPayload | null;
-          const expiresAt = decodedToken?.exp
-            ? new Date(decodedToken.exp * 1000)
-            : new Date(Date.now() + 40 * 60 * 1000);
-
-          await SessionModel.create({
-            user: checkEmail._id,
-            role: checkEmail.role,
-            jti,
-            active: true,
-            loginAt: new Date(),
-            lastSeenAt: new Date(),
-            expiresAt,
-          });
-          //  console.log("Melasi", token);
-          // const { password, ...info } = checkEmail._doc;
-          res.cookie("sessionId", token);
-          // console.log(req.headers["cookie"]);
-
-          return res.status(201).json({
-            success: 1,
-            message: "login successful",
-            data:token ,
-          });
-        }
-        return res.status(404).json({
-          message: "Access denied",
-        });
-      } else {
-        return res.status(404).json({
-          message: "Password is incorrect",
-        });
-      }
-    } else {
-      return res.status(404).json({
-        message: "user does not exist",
-      });
+    const response = await loginWithAuthService(String(email).toLowerCase(), String(password));
+    const authUser = response.user;
+    if (authUser) {
+      await syncLocalShadowUser(authUser);
     }
+
+    const token = String(response.data || "");
+    res.cookie("sessionId", token);
+
+    return res.status(201).json({
+      success: 1,
+      message: "login successful",
+      data: token,
+    });
   } catch (error: any) {
-    return res.status(404).json({
-      message: `unable to login because ${error}`,
+    return res.status(error?.status || 400).json({
+      message: error?.message || `unable to login because ${error}`,
     });
   } 
 };
@@ -221,69 +193,38 @@ if(checkrole !== "Admin"){
         message: "All fields required",
       });
     }
-    const CheckEmail = await UserModel.findOne({ email: email });
-    if (CheckEmail) {
-      return res.status(401).json({
-        message: "Email Already in use",
-      });
-    }
-    if (Password.length < 8) {
-      return res.status(401).json({
-        message: "password must not be less than eight characters",
-      });
-    }
 
     const adminId = req.user?._id;
-    if (!adminId) {
+    const authToken = req.authToken;
+    if (!adminId || !authToken) {
       return res.status(401).json({
         message: "Access denied",
       });
     }
-
-    const salt = await bcrypt.genSalt(10);
-    const HashedPassword = await bcrypt.hash(Password, salt);
-
-    const session = await mongoose.startSession();
-    let UserData: any;
-
-    try {
-      await session.withTransaction(async () => {
-        const createdUsers = await UserModel.create(
-          [
-            {
-              fullName: normalizedFullName,
-              email: email,
-              password: HashedPassword,
-              role: "User",
-              createdByAdmin: new mongoose.Types.ObjectId(adminId),
-            },
-          ],
-          { session }
-        );
-        UserData = createdUsers[0];
-
-        const adminUpdate = await UserModel.findByIdAndUpdate(
-          adminId,
-          { $addToSet: { createdUsers: UserData._id } },
-          { session, returnDocument: "after" }
-        );
-
-        if (!adminUpdate) {
-          throw new Error("Admin account not found");
-        }
-      });
-    } finally {
-      await session.endSession();
+    const created = await createAuthUser(authToken, {
+      email: String(email).toLowerCase(),
+      password: String(Password),
+      fullName: normalizedFullName,
+      role: "User",
+    });
+    const authUser = created.data?.user;
+    if (!authUser) {
+      return res.status(400).json({ message: "unable to create user" });
     }
+
+    const UserData = await syncLocalShadowUser(authUser, {
+      createdByAdmin: adminId,
+      addCreatedUserToAdminId: adminId,
+    });
 
  return res.status(200).json({
       message: "registration was successful",
       success: 1,
       Result: {
-        _id: UserData._id,
-        fullName: UserData.fullName,
-        email: UserData.email,
-        role: UserData.role,
+        _id: UserData?._id || authUser._id,
+        fullName: UserData?.fullName || authUser.fullName,
+        email: UserData?.email || authUser.email,
+        role: UserData?.role || "User",
       },
     });
      } catch (error: any) {
@@ -297,32 +238,27 @@ if(checkrole !== "Admin"){
 
 export const  GetEasyBoughtItems = async (req: Request, res: Response) => {
 try {
-      const userEmail = req.user?.email;
-      if (!userEmail) {
+      const userId = req.user?._id;
+      if (!userId) {
         return res.status(401).json({
           message: "Access denied",
         });
       }
-      const checkuser = await UserModel.findOne({ email: userEmail });
-      if(checkuser){
-        const userId = checkuser._id;
+      {
         const easyBoughtItems = await EasyBoughtItemModel.find({UserId:userId}).lean();
         const normalizedItems = easyBoughtItems.map((item: any) => ({
           ...item,
           PhonePrice: item.PhonePrice ?? item.TotalPrice ?? 0,
           IphoneImageUrl: (() => {
+            const provider = getReadProvider(item.provider);
             const model = String(item.IphoneModel || "");
-            const catalogEntry = EASYBUY_CATALOG_MAP.get(model);
-            return catalogEntry ? resolveCatalogImageUrl(req, catalogEntry) : item.IphoneImageUrl;
+            const catalogEntry = provider.catalogMap.get(model);
+            return catalogEntry ? resolveCatalogImageUrl(req, provider, catalogEntry) : item.IphoneImageUrl;
           })(),
         }));
         return res.status(200).json({
           message: "EasyBoughtItems retrieved successfully",
           data: normalizedItems,
-        });
-      } else {
-        return res.status(404).json({
-          message: "User not found",
         });
       }
     }
@@ -342,7 +278,17 @@ export const GetAllUsers = async (req: Request, res: Response) => {
       });
     }
     else{
-      const users = await UserModel.find().select("-password");
+      const authToken = req.authToken;
+      if (!authToken) {
+        return res.status(401).json({ message: "Access denied" });
+      }
+      const payload = await listAuthUsers(authToken, { page: 1, limit: 200 });
+      const authUsers = Array.isArray(payload.data) ? payload.data : [];
+      const users = [];
+      for (const authUser of authUsers) {
+        const localUser = await syncLocalShadowUser(authUser);
+        users.push(localUser);
+      }
       return res.status(200).json({
         message: "Users retrieved successfully",
         data: users,
@@ -357,22 +303,29 @@ export const GetAllUsers = async (req: Request, res: Response) => {
 
 export const GetEasyBuyCatalog = async (req: Request, res: Response) => {
   try {
-    const pricingDocs = await EasyBuyCapacityPriceModel.find()
-      .select({ model: 1, capacity: 1, price: 1, _id: 0 })
-      .lean();
-    const priceLookup = buildEasyBuyPriceLookup(pricingDocs);
+    const provider = getReadProvider(req.query?.provider);
+    const pricingFilter: Record<string, unknown> = {};
+    appendPricingProviderFilter(pricingFilter, provider);
 
-    const models = EASYBUY_CATALOG.map((entry) => ({
+    const pricingDocs = await EasyBuyCapacityPriceModel.find(pricingFilter)
+      .select({ provider: 1, model: 1, capacity: 1, price: 1, _id: 0 })
+      .lean();
+    const priceLookup = provider.buildPriceLookup(
+      sortPricingDocsByProviderPrecedence(pricingDocs, provider)
+    );
+
+    const models = provider.catalog.map((entry) => ({
       ...entry,
-      imageUrl: resolveCatalogImageUrl(req, entry),
-      pricesByCapacity: getModelPricesByCapacity(priceLookup, entry.model),
+      imageUrl: resolveCatalogImageUrl(req, provider, entry),
+      pricesByCapacity: provider.getModelPrices(priceLookup, entry.model),
     }));
 
     return res.status(200).json({
       message: "EasyBuy catalog retrieved successfully",
       data: {
+        provider: provider.slug,
         models,
-        planRules: EASYBUY_PLAN_RULES,
+        planRules: provider.planRules,
       },
     });
   } catch (error: any) {
@@ -384,14 +337,15 @@ export const GetEasyBuyCatalog = async (req: Request, res: Response) => {
 };
 
 export const GetEasyBuyCatalogImage = async (req: Request, res: Response) => {
+  const provider = getReadProvider(req.query?.provider);
   const requestedModel = decodeURIComponent(String(req.params.model || "")).trim();
-  const entry = EASYBUY_CATALOG_MAP.get(requestedModel);
+  const entry = provider.catalogMap.get(requestedModel);
 
   if (!entry) {
     return sendCatalogFallbackSvg(res, requestedModel || "iPhone");
   }
 
-  const candidates = getCatalogImageFetchCandidates(entry);
+  const candidates = getCatalogImageFetchCandidates(provider, entry);
 
   for (const candidateUrl of candidates) {
     if (!/^https?:\/\//i.test(candidateUrl)) continue;
@@ -436,17 +390,10 @@ export const CreateEasyBoughtItem = async (req: Request, res: Response) => {
     }
 
     try {
-      const CheckUseremail = req.user?.email;
-    if (!CheckUseremail) {
+    const CheckUseremail = req.user?.email;
+    const authToken = req.authToken;
+    if (!CheckUseremail || !authToken) {
       return res.status(401).json({
-        message: "Access denied",
-      });
-    }
-    const CheckRole = await UserModel.findOne({email:CheckUseremail});
-
-    if(CheckRole?.role !== "Admin"){
-
-      return res.status(404).json({
         message: "Access denied",
       });
     }
@@ -454,6 +401,7 @@ export const CreateEasyBoughtItem = async (req: Request, res: Response) => {
    
 
     const {
+      provider: rawProvider,
       IphoneModel,
       ItemName,
       capacity,
@@ -465,8 +413,16 @@ export const CreateEasyBoughtItem = async (req: Request, res: Response) => {
       weeklyPlan,
       UserEmail,
     } = req.body;
+    let provider: FinanceProvider;
+    try {
+      provider = getWriteProvider(rawProvider);
+    } catch (error: any) {
+      return res.status(400).json({
+        message: error?.message || "Unsupported provider",
+      });
+    }
     const resolvedIphoneModel = String(IphoneModel || ItemName || "").trim();
-    const resolvedCapacity = normalizeCapacityInput(capacity);
+    const resolvedCapacity = provider.normalizeCapacityInput(capacity);
     const resolvedUserEmail = String(UserEmail || req.user?.email || "").trim();
     if (
       !resolvedIphoneModel ||
@@ -479,7 +435,7 @@ export const CreateEasyBoughtItem = async (req: Request, res: Response) => {
       });
     }
 
-    const catalogEntry = EASYBUY_CATALOG_MAP.get(resolvedIphoneModel);
+    const catalogEntry = provider.catalogMap.get(resolvedIphoneModel);
     if (!catalogEntry) {
       return res.status(400).json({
         message: "Unsupported iPhone model",
@@ -512,26 +468,30 @@ export const CreateEasyBoughtItem = async (req: Request, res: Response) => {
     const monthlyPlanNumber = Number(monthlyPlan);
     const weeklyPlanNumber = Number(weeklyPlan);
 
-    if (resolvedPlan === "Monthly" && !EASYBUY_PLAN_RULES.monthlyDurations.includes(monthlyPlanNumber)) {
+    if (resolvedPlan === "Monthly" && !provider.planRules.monthlyDurations.includes(monthlyPlanNumber)) {
       return res.status(400).json({
-        message: `monthlyPlan must be one of: ${EASYBUY_PLAN_RULES.monthlyDurations.join(", ")}`,
+        message: `monthlyPlan must be one of: ${provider.planRules.monthlyDurations.join(", ")}`,
       });
     }
 
-    if (resolvedPlan === "Weekly" && !EASYBUY_PLAN_RULES.weeklyDurations.includes(weeklyPlanNumber)) {
+    if (resolvedPlan === "Weekly" && !provider.planRules.weeklyDurations.includes(weeklyPlanNumber)) {
       return res.status(400).json({
-        message: `weeklyPlan must be one of: ${EASYBUY_PLAN_RULES.weeklyDurations.join(", ")}`,
+        message: `weeklyPlan must be one of: ${provider.planRules.weeklyDurations.join(", ")}`,
       });
     }
 
-    const getUser = await UserModel.findOne({email:resolvedUserEmail});
+    const authUser = await findAuthUserByEmail(authToken, resolvedUserEmail);
+    const getUser = authUser
+      ? await syncLocalShadowUser(authUser)
+      : null;
     if(!getUser){
       return res.status(404).json({
         message: "User does not exist",
       });
     }
 
-    const downPaymentMultiplier = catalogEntry.downPaymentPercentage / 100;
+    const downPaymentMultiplier =
+      provider.resolveDownPaymentPercentage(resolvedIphoneModel, phonePriceNumber) / 100;
     const minimumDownPayment = phonePriceNumber * downPaymentMultiplier;
     const requestedDownPayment =
       downPayment === undefined || downPayment === null || downPayment === ""
@@ -567,8 +527,9 @@ export const CreateEasyBoughtItem = async (req: Request, res: Response) => {
     }
 
     const easyBoughtPayload: Record<string, any> = {
+      provider: provider.slug,
       IphoneModel: resolvedIphoneModel,
-      IphoneImageUrl: resolveCatalogImageUrl(req, catalogEntry),
+      IphoneImageUrl: resolveCatalogImageUrl(req, provider, catalogEntry),
       capacity: resolvedCapacity,
       Plan: resolvedPlan,
       downPayment: normalizedDownPayment,
@@ -602,21 +563,9 @@ export const CreateEasyBoughtItem = async (req: Request, res: Response) => {
 
 
     try {
-      const userId = req.user?._id;
-      const userSessionJti = req.user?.jti;
-
-      if (userId) {
-        const filter = userSessionJti
-          ? { user: userId, jti: userSessionJti, active: true }
-          : { user: userId, active: true };
-
-        await SessionModel.updateMany(filter, {
-          $set: {
-            active: false,
-            logoutAt: new Date(),
-            lastSeenAt: new Date(),
-          },
-        });
+      const authToken = req.authToken;
+      if (authToken) {
+        await logoutWithAuthService(authToken);
       }
 
       res.clearCookie("sessionId");
@@ -632,10 +581,25 @@ export const CreateEasyBoughtItem = async (req: Request, res: Response) => {
   }   
  export const GetCurrentUser = async (req: Request, res: Response) => {
 try {
-  const user = req.user;
+  const token = req.authToken;
+  if (!token) {
+    return res.status(401).json({ message: "Access denied" });
+  }
+  const payload = await getAuthMe(token);
+  const user = payload.data?.user;
   return res.status(200).json({
     message: "Current user retrieved successfully",
-    data: user,
+    data: user
+      ? {
+          ...user,
+          role:
+            user.role === "admin"
+              ? "Admin"
+              : user.role === "superadmin"
+                ? "SuperAdmin"
+                : "User",
+        }
+      : req.user,
   });
 } catch (error) {
   return res.status(400).json({

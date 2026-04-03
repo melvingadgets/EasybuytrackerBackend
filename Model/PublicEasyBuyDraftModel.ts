@@ -5,6 +5,7 @@ type PublicEasyBuyDraftStatus = "draft" | "submitted";
 
 type PublicEasyBuyDraft = {
   anonymousId: string;
+  provider?: string;
   currentStep: PublicEasyBuyDraftStep;
   status: PublicEasyBuyDraftStatus;
   fullName?: string;
@@ -36,6 +37,11 @@ const PublicEasyBuyDraftSchema = new mongoose.Schema<PublicEasyBuyDraft>(
       required: true,
       unique: true,
       index: true,
+      trim: true,
+    },
+    provider: {
+      type: String,
+      default: "aurapay",
       trim: true,
     },
     currentStep: {

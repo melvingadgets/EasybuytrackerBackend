@@ -1,20 +1,20 @@
 import type { NextFunction, Request, Response } from "express";
 import jwt, { type JwtPayload } from "jsonwebtoken";
-import SessionModel from "../Model/SessionModel.js";
-import UserModel from "../Model/UserModel.js";
 import { config } from "../config/Config.js";
+import { syncLocalShadowUser, toLegacyRole } from "../Service/AuthService.js";
 
 type AppRole = "Admin" | "User" | "SuperAdmin";
 
 type TokenPayload = JwtPayload & {
   _id: string;
-  userName: string;
-  role: AppRole;
+  fullName?: string;
+  userName?: string;
+  role: "user" | "admin" | "superadmin" | AppRole;
   email: string;
   jti?: string;
 };
 
-const JWT_SECRET = config.jwtSecret;
+const JWT_SECRET = config.auth.jwtSecret;
 
 const getTokenFromRequest = (req: Request): string => {
   const authHeader = req.headers.authorization;
@@ -47,43 +47,26 @@ export const verifyToken = async (req: Request, res: Response, next: NextFunctio
       return res.status(401).json({ message: "invalid token payload" });
     }
 
-    let activeSession: { _id: unknown; role?: AppRole } | null = null;
-    if (payload.jti) {
-      const now = new Date();
-      activeSession = await SessionModel.findOneAndUpdate(
-        {
-          jti: payload.jti,
-          user: payload._id,
-          active: true,
-          expiresAt: { $gt: now },
-        },
-        { $set: { lastSeenAt: now } }
-      ).lean();
+    const normalizedRole = toLegacyRole(String(payload.role || ""));
+    const normalizedName = String(payload.fullName || payload.userName || "");
 
-      if (!activeSession) {
-        return res.status(401).json({ message: "session inactive or expired" });
-      }
-    }
-
-    const liveUser = await UserModel.findById(payload._id)
-      .select({ fullName: 1, email: 1, role: 1 })
-      .lean();
-    if (!liveUser) {
-      return res.status(401).json({ message: "user not found" });
-    }
-
-    if (payload.jti && activeSession?.role && activeSession.role !== liveUser.role) {
-      await SessionModel.updateOne(
-        { jti: payload.jti, user: payload._id },
-        { $set: { role: liveUser.role } }
-      );
-    }
+    await syncLocalShadowUser({
+      _id: String(payload._id),
+      email: String(payload.email || ""),
+      fullName: normalizedName,
+      role:
+        normalizedRole === "Admin"
+          ? "admin"
+          : normalizedRole === "SuperAdmin"
+            ? "superadmin"
+            : "user",
+    });
 
     const currentUser: Request["user"] = {
-      _id: String(liveUser._id),
-      userName: String(liveUser.fullName || ""),
-      email: String(liveUser.email || ""),
-      role: liveUser.role,
+      _id: String(payload._id),
+      userName: normalizedName,
+      email: String(payload.email || ""),
+      role: normalizedRole,
     };
     if (payload.jti) {
       currentUser.jti = String(payload.jti);

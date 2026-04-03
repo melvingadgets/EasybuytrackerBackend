@@ -10,6 +10,7 @@ type PublicEasyBuyRequestStatus =
 
 type PublicEasyBuyRequest = {
   requestId: string;
+  provider: string;
   fullName: string;
   email: string;
   phone: string;
@@ -49,6 +50,12 @@ const PublicEasyBuyRequestSchema = new mongoose.Schema<PublicEasyBuyRequest>(
       unique: true,
       index: true,
       trim: true,
+    },
+    provider: {
+      type: String,
+      default: "aurapay",
+      trim: true,
+      index: true,
     },
     fullName: {
       type: String,

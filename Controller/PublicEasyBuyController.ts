@@ -1,10 +1,12 @@
 import { type Request, type Response } from "express";
 import crypto from "crypto";
 import EasyBuyCapacityPriceModel from "../Model/EasyBuyCapacityPriceModel.js";
+import EasyBuyEventModel from "../Model/EasyBuyEventModel.js";
 import PublicEasyBuyDraftModel from "../Model/PublicEasyBuyDraftModel.js";
 import PublicEasyBuyRequestModel from "../Model/PublicEasyBuyRequestModel.js";
-import { EASYBUY_CATALOG, EASYBUY_CATALOG_MAP, EASYBUY_PLAN_RULES, normalizeCapacityInput } from "../Utils/EasyBuyCatalog.js";
-import { buildEasyBuyPriceLookup, getModelPricesByCapacity } from "../Utils/EasyBuyPricing.js";
+import { appendPricingProviderFilter, sortPricingDocsByProviderPrecedence } from "../Utils/providers/helpers.js";
+import { getAllProviderSlugs, getProvider, resolveProvider } from "../Utils/providers/registry.js";
+import type { FinanceProvider } from "../Utils/providers/types.js";
 
 const MAX_SUBMITS_PER_WINDOW = 8;
 const SUBMIT_WINDOW_MS = 1000 * 60 * 15;
@@ -22,23 +24,43 @@ const VERIFICATION_DISABLED_MESSAGE =
 const submitRateLimiter = new Map<string, { count: number; windowStart: number }>();
 const draftSaveRateLimiter = new Map<string, { count: number; windowStart: number }>();
 const catalogRateLimiter = new Map<string, { count: number; windowStart: number }>();
-let catalogCache: {
-  expiresAt: number;
-  payload: {
-    models: Array<{
-      model: string;
-      imageUrl: string;
-      capacities: string[];
-      allowedPlans: Array<"Monthly" | "Weekly">;
-      downPaymentPercentage: 40 | 60;
-      pricesByCapacity: Record<string, number>;
-    }>;
-    planRules: typeof EASYBUY_PLAN_RULES;
-  };
-} | null = null;
+
+type PublicCatalogPayload = {
+  models: Array<{
+    model: string;
+    imageUrl: string;
+    capacities: string[];
+    allowedPlans: Array<"Monthly" | "Weekly">;
+    downPaymentPercentage: number;
+    pricesByCapacity: Record<string, number>;
+  }>;
+  planRules: FinanceProvider["planRules"];
+  provider: string;
+};
+
+const catalogCacheMap = new Map<
+  string,
+  {
+    expiresAt: number;
+    payload: PublicCatalogPayload;
+  }
+>();
 
 const normalizeString = (value: unknown): string => String(value ?? "").trim();
 const normalizeEmail = (value: unknown): string => normalizeString(value).toLowerCase();
+const isPlainObject = (value: unknown): value is Record<string, unknown> => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+};
+
+const PUBLIC_EVENT_TYPES = [
+  "page_view",
+  "form_start",
+  "provider_selected",
+  "step_complete",
+  "form_submit",
+] as const;
 
 const getForwardedAddress = (value: unknown): string => {
   const resolved = String(value ?? "").split(",")[0] || "";
@@ -119,18 +141,24 @@ const isRateLimited = (
   return existing.count > maxRequests;
 };
 
-const buildSafePublicCatalog = async () => {
-  if (catalogCache && catalogCache.expiresAt > Date.now()) {
-    return catalogCache.payload;
+const buildSafePublicCatalog = async (provider: FinanceProvider): Promise<PublicCatalogPayload> => {
+  const cached = catalogCacheMap.get(provider.slug);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.payload;
   }
 
-  const pricingDocs = await EasyBuyCapacityPriceModel.find()
-    .select({ model: 1, capacity: 1, price: 1, _id: 0 })
-    .lean();
-  const priceLookup = buildEasyBuyPriceLookup(pricingDocs);
+  const pricingFilter: Record<string, unknown> = {};
+  appendPricingProviderFilter(pricingFilter, provider);
 
-  const models = EASYBUY_CATALOG.map((entry) => {
-    const pricesByCapacityRaw = getModelPricesByCapacity(priceLookup, entry.model);
+  const pricingDocs = await EasyBuyCapacityPriceModel.find(pricingFilter)
+    .select({ provider: 1, model: 1, capacity: 1, price: 1, _id: 0 })
+    .lean();
+  const priceLookup = provider.buildPriceLookup(
+    sortPricingDocsByProviderPrecedence(pricingDocs, provider)
+  );
+
+  const models = provider.catalog.map((entry) => {
+    const pricesByCapacityRaw = provider.getModelPrices(priceLookup, entry.model);
     const safePricesByCapacity: Record<string, number> = {};
 
     for (const capacity of entry.capacities) {
@@ -146,15 +174,16 @@ const buildSafePublicCatalog = async () => {
     };
   });
 
-  const payload = {
+  const payload: PublicCatalogPayload = {
     models,
-    planRules: EASYBUY_PLAN_RULES,
+    planRules: provider.planRules,
+    provider: provider.slug,
   };
 
-  catalogCache = {
+  catalogCacheMap.set(provider.slug, {
     expiresAt: Date.now() + CATALOG_CACHE_TTL_MS,
     payload,
-  };
+  });
 
   return payload;
 };
@@ -185,7 +214,8 @@ export const GetPublicEasyBuyCatalog = async (req: Request, res: Response) => {
   }
 
   try {
-    const payload = await buildSafePublicCatalog();
+    const provider = resolveProvider(req.query?.provider as string);
+    const payload = await buildSafePublicCatalog(provider);
     res.setHeader("Cache-Control", "public, max-age=60, stale-while-revalidate=120");
 
     return res.status(200).json({
@@ -225,11 +255,12 @@ export const SavePublicEasyBuyDraftStep = async (req: Request, res: Response) =>
     }
 
     const anonymousId = ensureAnonymousId(req, res);
+    const provider = resolveProvider(req.body?.provider as string);
     const fullName = normalizeString(req.body?.fullName);
     const email = normalizeEmail(req.body?.email);
     const phone = normalizeString(req.body?.phone);
     const iphoneModel = normalizeString(req.body?.iphoneModel);
-    const capacity = normalizeCapacityInput(req.body?.capacity);
+    const capacity = provider.normalizeCapacityInput(req.body?.capacity);
     const plan = normalizeString(req.body?.plan) as "Monthly" | "Weekly";
     const address = normalizeString(req.body?.address);
     const occupation = normalizeString(req.body?.occupation);
@@ -237,6 +268,7 @@ export const SavePublicEasyBuyDraftStep = async (req: Request, res: Response) =>
     const weeklyPlan = normalizePositiveInteger(req.body?.weeklyPlan);
 
     const updatePayload: Record<string, unknown> = {
+      provider: provider.slug,
       currentStep: step,
       status: "draft",
       ipAddress,
@@ -275,7 +307,7 @@ export const SavePublicEasyBuyDraftStep = async (req: Request, res: Response) =>
         });
       }
 
-      const catalogEntry = EASYBUY_CATALOG_MAP.get(iphoneModel);
+      const catalogEntry = provider.catalogMap.get(iphoneModel);
       if (!catalogEntry) {
         return res.status(400).json({
           message: "Unsupported iPhone model",
@@ -295,7 +327,7 @@ export const SavePublicEasyBuyDraftStep = async (req: Request, res: Response) =>
       }
 
       if (plan === "Monthly") {
-        if (!monthlyPlan || !EASYBUY_PLAN_RULES.monthlyDurations.includes(monthlyPlan)) {
+        if (!monthlyPlan || !provider.planRules.monthlyDurations.includes(monthlyPlan)) {
           return res.status(400).json({
             message: "A valid monthlyPlan is required for Monthly plan",
           });
@@ -303,7 +335,7 @@ export const SavePublicEasyBuyDraftStep = async (req: Request, res: Response) =>
         updatePayload.monthlyPlan = monthlyPlan;
         unsetPayload.weeklyPlan = "";
       } else {
-        if (!weeklyPlan || !EASYBUY_PLAN_RULES.weeklyDurations.includes(weeklyPlan)) {
+        if (!weeklyPlan || !provider.planRules.weeklyDurations.includes(weeklyPlan)) {
           return res.status(400).json({
             message: "A valid weeklyPlan is required for Weekly plan",
           });
@@ -329,14 +361,10 @@ export const SavePublicEasyBuyDraftStep = async (req: Request, res: Response) =>
       updateQuery.$unset = unsetPayload;
     }
 
-    const saved = await PublicEasyBuyDraftModel.findOneAndUpdate(
-      { anonymousId },
-      updateQuery,
-      {
-        upsert: true,
-        returnDocument: "after",
-      }
-    ).lean();
+    const saved = await PublicEasyBuyDraftModel.findOneAndUpdate({ anonymousId }, updateQuery, {
+      upsert: true,
+      returnDocument: "after",
+    }).lean();
 
     return res.status(200).json({
       message: "Draft step saved",
@@ -375,7 +403,8 @@ export const CreatePublicEasyBuyRequest = async (req: Request, res: Response) =>
     const email = normalizeEmail(req.body?.email);
     const phone = normalizeString(req.body?.phone);
     const iphoneModel = normalizeString(req.body?.iphoneModel);
-    const capacity = normalizeCapacityInput(req.body?.capacity);
+    const provider = resolveProvider(req.body?.provider as string);
+    const capacity = provider.normalizeCapacityInput(req.body?.capacity);
     const plan = normalizeString(req.body?.plan) as "Monthly" | "Weekly";
 
     if (!fullName || !email || !phone || !iphoneModel || !capacity || !plan) {
@@ -384,7 +413,7 @@ export const CreatePublicEasyBuyRequest = async (req: Request, res: Response) =>
       });
     }
 
-    const catalogEntry = EASYBUY_CATALOG_MAP.get(iphoneModel);
+    const catalogEntry = provider.catalogMap.get(iphoneModel);
     if (!catalogEntry) {
       return res.status(400).json({
         message: "Unsupported iPhone model",
@@ -428,6 +457,7 @@ export const CreatePublicEasyBuyRequest = async (req: Request, res: Response) =>
 
     const created = await PublicEasyBuyRequestModel.create({
       requestId,
+      provider: provider.slug,
       fullName,
       email,
       phone,
@@ -462,6 +492,7 @@ export const CreatePublicEasyBuyRequest = async (req: Request, res: Response) =>
       data: {
         requestId: created.requestId,
         status: created.status,
+        provider: provider.slug,
       },
     });
   } catch (error: any) {
@@ -539,6 +570,77 @@ export const VerifyPublicEasyBuyRequest = async (req: Request, res: Response) =>
     return res.status(400).json({
       message: "Failed to verify request",
       reason: error?.message || "Unknown error",
+    });
+  }
+};
+
+export const GetPublicProviders = async (req: Request, res: Response) => {
+  const ipAddress = getClientIp(req);
+  const limiterKey = `${ipAddress}::${normalizeString(req.headers["user-agent"])}`;
+  if (isRateLimited(limiterKey, catalogRateLimiter, MAX_CATALOG_READS_PER_WINDOW, CATALOG_READ_WINDOW_MS)) {
+    return res.status(429).json({
+      message: "Too many requests. Please wait and try again.",
+    });
+  }
+
+  try {
+    const providers = getAllProviderSlugs()
+      .map((slug) => {
+        const provider = getProvider(slug);
+        return provider ? { slug: provider.slug, displayName: provider.displayName } : null;
+      })
+      .filter(Boolean);
+
+    return res.status(200).json({
+      message: "Providers retrieved successfully",
+      data: providers,
+    });
+  } catch (_error: any) {
+    return res.status(400).json({
+      message: "Failed to retrieve providers",
+    });
+  }
+};
+
+export const TrackPublicEvent = async (req: Request, res: Response) => {
+  try {
+    const anonymousId = normalizeString(req.body?.anonymousId);
+    const event = normalizeString(req.body?.event);
+
+    if (!anonymousId || !PUBLIC_EVENT_TYPES.includes(event as (typeof PUBLIC_EVENT_TYPES)[number])) {
+      return res.status(400).json({
+        message: "anonymousId and a valid event are required",
+      });
+    }
+
+    const provider = String(req.body?.provider || "").trim().toLowerCase() || undefined;
+    const meta = isPlainObject(req.body?.meta) ? req.body.meta : {};
+    const utmSource = normalizeString(req.body?.utmSource) || undefined;
+    const utmMedium = normalizeString(req.body?.utmMedium) || undefined;
+    const utmCampaign = normalizeString(req.body?.utmCampaign) || undefined;
+    const utmTerm = normalizeString(req.body?.utmTerm) || undefined;
+    const utmContent = normalizeString(req.body?.utmContent) || undefined;
+    const referrer = normalizeString(req.body?.referrer) || undefined;
+    const landingPage = normalizeString(req.body?.landingPage) || undefined;
+
+    await EasyBuyEventModel.create({
+      anonymousId,
+      event,
+      meta,
+      ...(provider ? { provider } : {}),
+      ...(utmSource ? { utmSource } : {}),
+      ...(utmMedium ? { utmMedium } : {}),
+      ...(utmCampaign ? { utmCampaign } : {}),
+      ...(utmTerm ? { utmTerm } : {}),
+      ...(utmContent ? { utmContent } : {}),
+      ...(referrer ? { referrer } : {}),
+      ...(landingPage ? { landingPage } : {}),
+    });
+
+    return res.status(200).json({ message: "ok" });
+  } catch (_error: any) {
+    return res.status(500).json({
+      message: "Failed to track event",
     });
   }
 };

@@ -2,6 +2,7 @@ import mongoose from "mongoose";
 
 
 interface easyboughtitem {
+    provider: string;
     IphoneModel: string;
     IphoneImageUrl: string;
     capacity: string;
@@ -21,6 +22,7 @@ interface easyboughtitem {
 interface Ieasyboughtitem extends easyboughtitem, mongoose.Document { }
 
 const EasyBoughtItemSchema = new mongoose.Schema({
+  provider: { type: String, default: "aurapay", trim: true, index: true },
   IphoneModel: { type: String, required: true },
   IphoneImageUrl: { type: String, required: true },
   capacity: { type: String, required: true },
@@ -28,8 +30,8 @@ const EasyBoughtItemSchema = new mongoose.Schema({
   downPayment:{type: Number, required:true},
   loanedAmount:{type: Number, required:true},
   PhonePrice: { type: Number, required: true },
-  monthlyPlan:{type:Number, enum:[1,2,3]},
-  weeklyPlan:{type:Number, enum:[4,8,12],},
+  monthlyPlan:{type:Number},
+  weeklyPlan:{type:Number},
   UserId:{type:mongoose.Types.ObjectId,ref:"User",required:true},
   UserEmail:{type:String,required:true}
 }, { timestamps: true })      

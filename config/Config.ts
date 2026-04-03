@@ -4,6 +4,9 @@ dotenv.config()
 const dbUrl = process.env.Database_url ?? process.env.DATABASE_URL
 const portValue = process.env.PORT ?? process.env.port
 const jwtSecret = String(process.env.JWT_SECRET ?? '').trim()
+const authServiceUrl = String(process.env.AUTH_SERVICE_URL ?? 'http://localhost:5500').trim().replace(/\/$/, '')
+const authJwtSecret = String(process.env.AUTH_JWT_SECRET ?? jwtSecret).trim()
+const authServiceKey = String(process.env.AUTH_SERVICE_KEY ?? '').trim()
 const mailProviderRaw = String(process.env.MAIL_PROVIDER ?? 'smtp').trim().toLowerCase()
 const mailProvider = mailProviderRaw === 'resend' ? 'resend' : 'smtp'
 const gmailUser = String(process.env.GMAIL_USER ?? '').trim()
@@ -39,6 +42,11 @@ export const config = {
   port: Number(portValue),
   Database_url: String(dbUrl),
   jwtSecret,
+  auth: {
+    serviceUrl: authServiceUrl,
+    jwtSecret: authJwtSecret,
+    serviceKey: authServiceKey,
+  },
   mail: {
     provider: mailProvider as 'smtp' | 'resend',
     mailFrom,

@@ -29,8 +29,9 @@ const UserSchema = new mongoose.Schema(
     // Required for existing authentication flow.
     password: {
       type: String,
-      required: true,
+      required: false,
       select: false,
+      default: null,
     },
     role: {
       type: String,

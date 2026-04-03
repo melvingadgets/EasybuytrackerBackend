@@ -1,6 +1,7 @@
 import mongoose from "mongoose";
 
 type EasyBuyCapacityPrice = {
+  provider: string;
   model: string;
   capacity: string;
   price: number;
@@ -9,6 +10,13 @@ type EasyBuyCapacityPrice = {
 
 const EasyBuyCapacityPriceSchema = new mongoose.Schema<EasyBuyCapacityPrice>(
   {
+    provider: {
+      type: String,
+      required: true,
+      default: "aurapay",
+      trim: true,
+      index: true,
+    },
     model: {
       type: String,
       required: true,
@@ -34,7 +42,7 @@ const EasyBuyCapacityPriceSchema = new mongoose.Schema<EasyBuyCapacityPrice>(
   { timestamps: true }
 );
 
-EasyBuyCapacityPriceSchema.index({ model: 1, capacity: 1 }, { unique: true });
+EasyBuyCapacityPriceSchema.index({ provider: 1, model: 1, capacity: 1 }, { unique: true });
 
 type IEasyBuyCapacityPrice = mongoose.InferSchemaType<typeof EasyBuyCapacityPriceSchema>;
 

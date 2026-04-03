@@ -12,17 +12,16 @@ import ReceiptModel from "../Model/ReceiptModel.js";
 import SessionModel from "../Model/SessionModel.js";
 import UserModel from "../Model/UserModel.js";
 import {
-  EASYBUY_CATALOG,
-  EASYBUY_CATALOG_MAP,
-  EASYBUY_PLAN_RULES,
-  normalizeCapacityInput,
-} from "../Utils/EasyBuyCatalog.js";
-import {
-  buildEasyBuyPriceLookup,
-  getModelPricesByCapacity,
-  isValidCatalogModelCapacity,
-  normalizePricingUpdateInput,
-} from "../Utils/EasyBuyPricing.js";
+  deleteAuthUser,
+  findAuthUserByEmail,
+  getAuthSessionStats,
+  listAuthUsers,
+  syncLocalShadowUser,
+} from "../Service/AuthService.js";
+import { EASYBUY_CATALOG, normalizeCapacityInput } from "../Utils/EasyBuyCatalog.js";
+import { normalizePricingUpdateInput } from "../Utils/EasyBuyPricing.js";
+import { appendPricingProviderFilter, sortPricingDocsByProviderPrecedence } from "../Utils/providers/helpers.js";
+import { getDefaultProvider, resolveProvider } from "../Utils/providers/registry.js";
 
 const normalizeReason = (value: unknown) => {
   const trimmed = String(value ?? "").trim();
@@ -42,16 +41,22 @@ const parseDateInput = (value: unknown, fieldName: string): Date => {
   return parsed;
 };
 
-const buildEasyBuyPricingModels = async () => {
-  const pricingDocs = await EasyBuyCapacityPriceModel.find()
-    .select({ model: 1, capacity: 1, price: 1, _id: 0 })
-    .lean();
-  const priceLookup = buildEasyBuyPriceLookup(pricingDocs);
+const buildEasyBuyPricingModels = async (providerSlug?: string) => {
+  const provider = providerSlug ? resolveProvider(providerSlug) : getDefaultProvider();
+  const filter: Record<string, unknown> = {};
+  appendPricingProviderFilter(filter, provider);
 
-  return EASYBUY_CATALOG.map((entry) => ({
+  const pricingDocs = await EasyBuyCapacityPriceModel.find(filter)
+    .select({ provider: 1, model: 1, capacity: 1, price: 1, _id: 0 })
+    .lean();
+  const priceLookup = provider.buildPriceLookup(
+    sortPricingDocsByProviderPrecedence(pricingDocs, provider)
+  );
+
+  return provider.catalog.map((entry) => ({
     model: entry.model,
     capacities: [...entry.capacities],
-    pricesByCapacity: getModelPricesByCapacity(priceLookup, entry.model),
+    pricesByCapacity: provider.getModelPrices(priceLookup, entry.model),
   }));
 };
 
@@ -69,7 +74,23 @@ const parsePositiveNumber = (value: unknown, fieldName: string): number => {
 
 export const SuperAdminGetAllUsers = async (_req: Request, res: Response) => {
   try {
-    const users = await UserModel.find()
+    const authToken = _req.authToken;
+    if (!authToken) {
+      return res.status(401).json({ message: "Access denied" });
+    }
+
+    const payload = await listAuthUsers(authToken, { page: 1, limit: 500 });
+    const authUsers = Array.isArray(payload.data) ? payload.data : [];
+    const localUsers = [];
+    for (const authUser of authUsers) {
+      const synced = await syncLocalShadowUser(authUser);
+      localUsers.push(synced);
+    }
+
+    const userIds = localUsers
+      .map((user) => user?._id)
+      .filter((value): value is string => Boolean(value));
+    const users = await UserModel.find({ _id: { $in: userIds } })
       .select("-password")
       .populate("createdByAdmin", "fullName email role")
       .lean();
@@ -87,8 +108,19 @@ export const SuperAdminGetAllUsers = async (_req: Request, res: Response) => {
   }
 };
 
-export const SuperAdminGetUsersWithEasyBoughtItems = async (_req: Request, res: Response) => {
+export const SuperAdminGetUsersWithEasyBoughtItems = async (req: Request, res: Response) => {
   try {
+    const authToken = req.authToken;
+    if (!authToken) {
+      return res.status(401).json({ message: "Access denied" });
+    }
+
+    const payload = await listAuthUsers(authToken, { page: 1, limit: 500 });
+    const authUsers = Array.isArray(payload.data) ? payload.data : [];
+    for (const authUser of authUsers) {
+      await syncLocalShadowUser(authUser);
+    }
+
     const users = await UserModel.find().select("-password").lean();
     if (!users.length) {
       return res.status(200).json({
@@ -130,9 +162,10 @@ export const SuperAdminGetUsersWithEasyBoughtItems = async (_req: Request, res: 
 export const SuperAdminDeleteUserOrAdmin = async (req: Request, res: Response) => {
   const actorId = req.user?._id;
   const actorRole = req.user?.role;
+  const authToken = req.authToken;
   const { userId } = req.params;
 
-  if (!actorId || actorRole !== "SuperAdmin") {
+  if (!actorId || actorRole !== "SuperAdmin" || !authToken) {
     return res.status(401).json({
       message: "Access denied",
     });
@@ -152,25 +185,33 @@ export const SuperAdminDeleteUserOrAdmin = async (req: Request, res: Response) =
 
   const reason = normalizeReason(req.body?.reason);
 
-  const targetUser = await UserModel.findById(userId)
-    .select("_id role email fullName")
-    .lean();
-
-  if (!targetUser) {
-    return res.status(404).json({
-      message: "User not found",
-    });
-  }
-
-  if (!["User", "Admin"].includes(targetUser.role)) {
-    return res.status(403).json({
-      message: "Only User or Admin accounts can be deleted through this endpoint",
-    });
-  }
-
   const session = await mongoose.startSession();
 
   try {
+    const deletedAuthUserPayload = await deleteAuthUser(authToken, String(userId));
+    const deletedAuthUser = deletedAuthUserPayload.data;
+    if (!deletedAuthUser) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    const targetUser = {
+      _id: deletedAuthUser._id,
+      role:
+        deletedAuthUser.role === "admin"
+          ? "Admin"
+          : deletedAuthUser.role === "superadmin"
+            ? "SuperAdmin"
+            : "User",
+      email: deletedAuthUser.email,
+      fullName: deletedAuthUser.fullName,
+    };
+
+    if (!["User", "Admin"].includes(targetUser.role)) {
+      return res.status(403).json({
+        message: "Only User or Admin accounts can be deleted through this endpoint",
+      });
+    }
+
     await session.withTransaction(async () => {
       await UserModel.findByIdAndDelete(targetUser._id, { session });
 
@@ -610,9 +651,10 @@ export const SuperAdminUpdateItemCreatedDate = async (req: Request, res: Respons
   }
 };
 
-export const SuperAdminGetEasyBuyPricing = async (_req: Request, res: Response) => {
+export const SuperAdminGetEasyBuyPricing = async (req: Request, res: Response) => {
   try {
-    const models = await buildEasyBuyPricingModels();
+    const providerSlug = normalizeString(req.query?.provider) || undefined;
+    const models = await buildEasyBuyPricingModels(providerSlug);
     return res.status(200).json({
       message: "EasyBuy pricing retrieved successfully",
       data: {
@@ -642,6 +684,9 @@ export const SuperAdminUpdateEasyBuyPricing = async (req: Request, res: Response
     });
   }
 
+  const providerSlug = normalizeString(req.body?.provider) || undefined;
+  const provider = resolveProvider(providerSlug);
+
   const validatedUpdates = new Map<string, { model: string; capacity: string; price: number }>();
 
   for (const update of updates) {
@@ -653,7 +698,7 @@ export const SuperAdminUpdateEasyBuyPricing = async (req: Request, res: Response
       });
     }
 
-    if (!isValidCatalogModelCapacity(model, capacity)) {
+    if (!provider.isValidModelCapacity(model, capacity)) {
       return res.status(400).json({
         message: `Unsupported model/capacity pair: ${model} ${capacity}`,
       });
@@ -674,9 +719,10 @@ export const SuperAdminUpdateEasyBuyPricing = async (req: Request, res: Response
 
   const bulkOperations = Array.from(validatedUpdates.values()).map((item) => ({
     updateOne: {
-      filter: { model: item.model, capacity: item.capacity },
+      filter: { provider: provider.slug, model: item.model, capacity: item.capacity },
       update: {
         $set: {
+          provider: provider.slug,
           model: item.model,
           capacity: item.capacity,
           price: item.price,
@@ -692,7 +738,7 @@ export const SuperAdminUpdateEasyBuyPricing = async (req: Request, res: Response
       await EasyBuyCapacityPriceModel.bulkWrite(bulkOperations, { ordered: false });
     }
 
-    const models = await buildEasyBuyPricingModels();
+    const models = await buildEasyBuyPricingModels(provider.slug);
     return res.status(200).json({
       message: "EasyBuy pricing updated successfully",
       data: {
@@ -712,11 +758,15 @@ export const SuperAdminListPublicEasyBuyRequests = async (req: Request, res: Res
   try {
     const status = normalizeString(req.query?.status);
     const search = normalizeString(req.query?.search);
+    const providerSlug = normalizeString(req.query?.provider);
     const safeSearch = search ? escapeRegExp(search) : "";
     const page = Math.max(Number(req.query?.page) || 1, 1);
     const limit = Math.min(Math.max(Number(req.query?.limit) || 20, 1), 100);
 
     const filter: Record<string, unknown> = {};
+    if (providerSlug) {
+      filter.provider = providerSlug;
+    }
     if (status) {
       filter.status = status;
     }
@@ -761,6 +811,7 @@ export const SuperAdminListPublicEasyBuyRequests = async (req: Request, res: Res
 export const SuperAdminListAbandonedPublicEasyBuyDrafts = async (req: Request, res: Response) => {
   try {
     const search = normalizeString(req.query?.search);
+    const providerSlug = normalizeString(req.query?.provider);
     const safeSearch = search ? escapeRegExp(search) : "";
     const page = Math.max(Number(req.query?.page) || 1, 1);
     const limit = Math.min(Math.max(Number(req.query?.limit) || 20, 1), 100);
@@ -774,6 +825,9 @@ export const SuperAdminListAbandonedPublicEasyBuyDrafts = async (req: Request, r
       status: "draft",
       updatedAt: { $lte: abandonedBefore },
     };
+    if (providerSlug) {
+      filter.provider = providerSlug;
+    }
     if (safeSearch) {
       filter.$or = [
         { fullName: { $regex: safeSearch, $options: "i" } },
@@ -967,7 +1021,8 @@ export const SuperAdminRejectPublicEasyBuyRequest = async (req: Request, res: Re
 export const SuperAdminConvertPublicEasyBuyRequest = async (req: Request, res: Response) => {
   const actorId = req.user?._id;
   const actorRole = req.user?.role;
-  if (!actorId || actorRole !== "SuperAdmin") {
+  const authToken = req.authToken;
+  if (!actorId || actorRole !== "SuperAdmin" || !authToken) {
     return res.status(401).json({ message: "Access denied" });
   }
 
@@ -999,10 +1054,11 @@ export const SuperAdminConvertPublicEasyBuyRequest = async (req: Request, res: R
         throw new Error(`Request is currently ${existing.status}`);
       }
 
+      const provider = resolveProvider((requestDoc as any).provider);
       const iphoneModel = normalizeString(requestDoc.iphoneModel);
-      const capacity = normalizeCapacityInput(requestDoc.capacity);
+      const capacity = provider.normalizeCapacityInput(requestDoc.capacity);
       const plan = normalizeString(req.body?.plan || requestDoc.plan) as "Monthly" | "Weekly";
-      const catalogEntry = EASYBUY_CATALOG_MAP.get(iphoneModel);
+      const catalogEntry = provider.catalogMap.get(iphoneModel);
       if (!catalogEntry) {
         throw new Error("Unsupported iPhone model");
       }
@@ -1018,7 +1074,8 @@ export const SuperAdminConvertPublicEasyBuyRequest = async (req: Request, res: R
         throw new Error("userEmail is required");
       }
 
-      const user = await UserModel.findOne({ email: resolvedUserEmail }).session(session).lean();
+      const authUser = await findAuthUserByEmail(authToken, resolvedUserEmail);
+      const user = authUser ? await syncLocalShadowUser(authUser) : null;
       if (!user) {
         throw new Error("No existing user found for this email. Create user account first.");
       }
@@ -1031,7 +1088,8 @@ export const SuperAdminConvertPublicEasyBuyRequest = async (req: Request, res: R
       }
 
       const phonePrice = parsePositiveNumber(req.body?.phonePrice, "phonePrice");
-      const minimumDownPayment = Number(((catalogEntry.downPaymentPercentage / 100) * phonePrice).toFixed(2));
+      const downPaymentPct = provider.resolveDownPaymentPercentage(iphoneModel, phonePrice);
+      const minimumDownPayment = Number(((downPaymentPct / 100) * phonePrice).toFixed(2));
       const downPayment =
         req.body?.downPayment === undefined || req.body?.downPayment === null || req.body?.downPayment === ""
           ? minimumDownPayment
@@ -1048,6 +1106,7 @@ export const SuperAdminConvertPublicEasyBuyRequest = async (req: Request, res: R
       const weeklyPlanNumber = Number(req.body?.weeklyPlan);
 
       const payload: Record<string, unknown> = {
+        provider: provider.slug,
         IphoneModel: iphoneModel,
         IphoneImageUrl: catalogEntry.imageUrl,
         capacity,
@@ -1060,15 +1119,15 @@ export const SuperAdminConvertPublicEasyBuyRequest = async (req: Request, res: R
       };
 
       if (plan === "Monthly") {
-        if (!EASYBUY_PLAN_RULES.monthlyDurations.includes(monthlyPlanNumber)) {
+        if (!provider.planRules.monthlyDurations.includes(monthlyPlanNumber)) {
           throw new Error(
-            `monthlyPlan must be one of: ${EASYBUY_PLAN_RULES.monthlyDurations.join(", ")}`
+            `monthlyPlan must be one of: ${provider.planRules.monthlyDurations.join(", ")}`
           );
         }
         payload.monthlyPlan = monthlyPlanNumber;
       } else {
-        if (!EASYBUY_PLAN_RULES.weeklyDurations.includes(weeklyPlanNumber)) {
-          throw new Error(`weeklyPlan must be one of: ${EASYBUY_PLAN_RULES.weeklyDurations.join(", ")}`);
+        if (!provider.planRules.weeklyDurations.includes(weeklyPlanNumber)) {
+          throw new Error(`weeklyPlan must be one of: ${provider.planRules.weeklyDurations.join(", ")}`);
         }
         payload.weeklyPlan = weeklyPlanNumber;
       }
@@ -1142,48 +1201,22 @@ export const SuperAdminConvertPublicEasyBuyRequest = async (req: Request, res: R
   }
 };
 
-export const SuperAdminGetLoginStats = async (_req: Request, res: Response) => {
+export const SuperAdminGetLoginStats = async (req: Request, res: Response) => {
   try {
-    const now = new Date();
-    const groupedActiveSessions = await SessionModel.aggregate([
-      {
-        $match: {
-          active: true,
-          expiresAt: { $gt: now },
-          role: { $in: ["User", "Admin", "SuperAdmin"] },
-        },
-      },
-      {
-        $group: {
-          _id: "$role",
-          uniqueUsers: { $addToSet: "$user" },
-        },
-      },
-      {
-        $project: {
-          _id: 0,
-          role: "$_id",
-          count: { $size: "$uniqueUsers" },
-        },
-      },
-    ]);
-
-    const roleCounts = groupedActiveSessions.reduce<Record<string, number>>((acc, item) => {
-      acc[String(item.role)] = Number(item.count || 0);
-      return acc;
-    }, {});
-
-    const usersLoggedIn = roleCounts.User || 0;
-    const adminsLoggedIn = roleCounts.Admin || 0;
-    const superAdminsLoggedIn = roleCounts.SuperAdmin || 0;
+    const authToken = req.authToken;
+    if (!authToken) {
+      return res.status(401).json({ message: "Access denied" });
+    }
+    const stats = await getAuthSessionStats(authToken);
+    const data = stats.data;
 
     return res.status(200).json({
       message: "Login statistics retrieved successfully",
       data: {
-        usersLoggedIn,
-        adminsLoggedIn,
-        superAdminsLoggedIn,
-        totalLoggedIn: usersLoggedIn + adminsLoggedIn + superAdminsLoggedIn,
+        usersLoggedIn: data?.usersLoggedIn || 0,
+        adminsLoggedIn: data?.adminsLoggedIn || 0,
+        superAdminsLoggedIn: data?.superAdminsLoggedIn || 0,
+        totalLoggedIn: data?.totalLoggedIn || 0,
       },
     });
   } catch (error: any) {
