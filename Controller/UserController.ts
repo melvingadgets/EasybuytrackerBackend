@@ -1,8 +1,12 @@
+import bcrypt from "bcrypt";
+import crypto from "crypto";
+import jwt from "jsonwebtoken";
 import UserModel from "../Model/UserModel.js";
 import {type Response, type Request} from "express";
 import EasyBoughtItemModel from "../Model/EasyBoughtitem.js";
 import EasyBuyCapacityPriceModel from "../Model/EasyBuyCapacityPriceModel.js";
 import mongoose from "mongoose";
+import { config } from "../config/Config.js";
 import {
   appendPricingProviderFilter,
   getReadProvider,
@@ -14,10 +18,7 @@ import type { CatalogEntry, FinanceProvider } from "../Utils/providers/types.js"
 import {
   createAuthUser,
   findAuthUserByEmail,
-  getAuthMe,
   listAuthUsers,
-  loginWithAuthService,
-  logoutWithAuthService,
   syncLocalShadowUser,
 } from "../Service/AuthService.js";
 
@@ -49,6 +50,7 @@ const GSM_ARENA_17_IMAGE_CANDIDATES: Record<string, string[]> = {
 };
 
 const DEFAULT_PROVIDER = getDefaultProvider();
+const ACCESS_TOKEN_TTL_SECONDS = 40 * 60;
 
 const getRequestBaseUrl = (req: Request): string => {
   const forwardedProto = (String(req.get("x-forwarded-proto") || "").split(",")[0] || "").trim();
@@ -100,6 +102,39 @@ const sendCatalogFallbackSvg = (res: Response, model: string) => {
   res.setHeader("Cache-Control", "public, max-age=300");
   return res.status(200).send(svg);
 };
+
+const isBcryptHash = (value: string): boolean => /^\$2[aby]\$\d{2}\$/.test(String(value || ""));
+
+const verifyLocalPassword = async (candidate: string, storedPassword: string): Promise<boolean> => {
+  const normalizedStored = String(storedPassword || "");
+  if (!normalizedStored) return false;
+  if (isBcryptHash(normalizedStored)) {
+    return bcrypt.compare(candidate, normalizedStored);
+  }
+  return candidate === normalizedStored;
+};
+
+const signLocalAccessToken = (args: {
+  _id: string;
+  email: string;
+  fullName: string;
+  role: "User" | "Admin" | "SuperAdmin";
+}): string =>
+  jwt.sign(
+    {
+      _id: args._id,
+      email: args.email,
+      fullName: args.fullName,
+      role:
+        args.role === "Admin" ? "admin" : args.role === "SuperAdmin" ? "superadmin" : "user",
+      jti: crypto.randomUUID(),
+      app: "easybuy",
+    },
+    config.auth.jwtSecret,
+    {
+      expiresIn: ACCESS_TOKEN_TTL_SECONDS,
+    }
+  );
 
 
 export const CreateAdmin = async (req: Request, res: Response) => {
@@ -158,13 +193,36 @@ export const LoginUser = async (
 ): Promise<Response> => {
   try {
     const { email, password } = req.body;
-    const response = await loginWithAuthService(String(email).toLowerCase(), String(password));
-    const authUser = response.user;
-    if (authUser) {
-      await syncLocalShadowUser(authUser);
+    const normalizedEmail = String(email || "").toLowerCase().trim();
+    const normalizedPassword = String(password || "");
+
+    if (!normalizedEmail || !normalizedPassword) {
+      return res.status(400).json({
+        message: "email and password are required",
+      });
     }
 
-    const token = String(response.data || "");
+    const user = await UserModel.findOne({ email: normalizedEmail }).select("+password");
+    if (!user) {
+      return res.status(404).json({
+        message: "user does not exist",
+      });
+    }
+
+    const validPassword = await verifyLocalPassword(normalizedPassword, String(user.password || ""));
+    if (!validPassword) {
+      return res.status(404).json({
+        message: "Password is incorrect",
+      });
+    }
+
+    const token = signLocalAccessToken({
+      _id: String(user._id),
+      email: String(user.email || ""),
+      fullName: String(user.fullName || ""),
+      role: user.role,
+    });
+
     res.cookie("sessionId", token);
 
     return res.status(201).json({
@@ -559,15 +617,10 @@ export const CreateEasyBoughtItem = async (req: Request, res: Response) => {
     }
   } 
 
-  export const LogoutUser = async (req: Request, res: Response) => {
+export const LogoutUser = async (req: Request, res: Response) => {
 
 
     try {
-      const authToken = req.authToken;
-      if (authToken) {
-        await logoutWithAuthService(authToken);
-      }
-
       res.clearCookie("sessionId");
       return res.status(200).json({
         message: "Logout successful",
@@ -581,25 +634,26 @@ export const CreateEasyBoughtItem = async (req: Request, res: Response) => {
   }   
  export const GetCurrentUser = async (req: Request, res: Response) => {
 try {
-  const token = req.authToken;
-  if (!token) {
+  const userId = req.user?._id;
+  if (!userId) {
     return res.status(401).json({ message: "Access denied" });
   }
-  const payload = await getAuthMe(token);
-  const user = payload.data?.user;
+
+  const user = await UserModel.findById(userId).lean();
+  if (!user) {
+    return res.status(404).json({
+      message: "User not found",
+    });
+  }
+
   return res.status(200).json({
     message: "Current user retrieved successfully",
-    data: user
-      ? {
-          ...user,
-          role:
-            user.role === "admin"
-              ? "Admin"
-              : user.role === "superadmin"
-                ? "SuperAdmin"
-                : "User",
-        }
-      : req.user,
+    data: {
+      _id: String(user._id),
+      fullName: String(user.fullName || ""),
+      email: String(user.email || ""),
+      role: String(user.role || "User"),
+    },
   });
 } catch (error) {
   return res.status(400).json({
