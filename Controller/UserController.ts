@@ -128,8 +128,7 @@ const createLocalSessionToken = (args: {
       _id: args._id,
       email: args.email,
       fullName: args.fullName,
-      role:
-        args.role === "Admin" ? "admin" : args.role === "SuperAdmin" ? "superadmin" : "user",
+      role: args.role,
       jti,
       app: "easybuy",
     },
