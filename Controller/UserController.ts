@@ -5,6 +5,7 @@ import UserModel from "../Model/UserModel.js";
 import {type Response, type Request} from "express";
 import EasyBoughtItemModel from "../Model/EasyBoughtitem.js";
 import EasyBuyCapacityPriceModel from "../Model/EasyBuyCapacityPriceModel.js";
+import SessionModel from "../Model/SessionModel.js";
 import mongoose from "mongoose";
 import { config } from "../config/Config.js";
 import {
@@ -15,12 +16,6 @@ import {
 } from "../Utils/providers/helpers.js";
 import { getDefaultProvider } from "../Utils/providers/registry.js";
 import type { CatalogEntry, FinanceProvider } from "../Utils/providers/types.js";
-import {
-  createAuthUser,
-  findAuthUserByEmail,
-  listAuthUsers,
-  syncLocalShadowUser,
-} from "../Service/AuthService.js";
 
 const PROXIED_CATALOG_IMAGE_MODELS = new Set([
   "iPhone 17",
@@ -51,6 +46,7 @@ const GSM_ARENA_17_IMAGE_CANDIDATES: Record<string, string[]> = {
 
 const DEFAULT_PROVIDER = getDefaultProvider();
 const ACCESS_TOKEN_TTL_SECONDS = 40 * 60;
+const PASSWORD_SALT_ROUNDS = 10;
 
 const getRequestBaseUrl = (req: Request): string => {
   const forwardedProto = (String(req.get("x-forwarded-proto") || "").split(",")[0] || "").trim();
@@ -114,20 +110,27 @@ const verifyLocalPassword = async (candidate: string, storedPassword: string): P
   return candidate === normalizedStored;
 };
 
-const signLocalAccessToken = (args: {
+const normalizeFullName = (firstName?: string, lastName?: string, fullName?: string) => {
+  if (String(fullName || "").trim()) return String(fullName).trim();
+  return `${firstName || ""} ${lastName || ""}`.trim();
+};
+
+const createLocalSessionToken = (args: {
   _id: string;
   email: string;
   fullName: string;
   role: "User" | "Admin" | "SuperAdmin";
-}): string =>
-  jwt.sign(
+}) => {
+  const jti = crypto.randomUUID();
+  const expiresAt = new Date(Date.now() + ACCESS_TOKEN_TTL_SECONDS * 1000);
+  const token = jwt.sign(
     {
       _id: args._id,
       email: args.email,
       fullName: args.fullName,
       role:
         args.role === "Admin" ? "admin" : args.role === "SuperAdmin" ? "superadmin" : "user",
-      jti: crypto.randomUUID(),
+      jti,
       app: "easybuy",
     },
     config.auth.jwtSecret,
@@ -135,6 +138,52 @@ const signLocalAccessToken = (args: {
       expiresIn: ACCESS_TOKEN_TTL_SECONDS,
     }
   );
+
+  return {
+    token,
+    jti,
+    expiresAt,
+  };
+};
+
+const createLocalUserRecord = async (args: {
+  email: string;
+  password: string;
+  fullName: string;
+  role: "User" | "Admin" | "SuperAdmin";
+  createdByAdmin?: string | null;
+  addCreatedUserToAdminId?: string;
+}) => {
+  const normalizedEmail = String(args.email || "").trim().toLowerCase();
+  const normalizedFullName = String(args.fullName || "").trim();
+  if (!normalizedEmail || !normalizedFullName || !String(args.password || "").trim()) {
+    throw new Error("All fields required");
+  }
+
+  const existingUser = await UserModel.findOne({ email: normalizedEmail }).lean();
+  if (existingUser) {
+    throw new Error("Email already in use");
+  }
+
+  const createdUser = await UserModel.create({
+    fullName: normalizedFullName,
+    email: normalizedEmail,
+    password: await bcrypt.hash(String(args.password), PASSWORD_SALT_ROUNDS),
+    role: args.role,
+    createdUsers: [],
+    createdByAdmin:
+      Object.prototype.hasOwnProperty.call(args, "createdByAdmin") ? (args.createdByAdmin || null) : null,
+    manualNextDueDate: null,
+  });
+
+  if (args.addCreatedUserToAdminId) {
+    await UserModel.findByIdAndUpdate(args.addCreatedUserToAdminId, {
+      $addToSet: { createdUsers: createdUser._id },
+    });
+  }
+
+  return createdUser;
+};
 
 
 export const CreateAdmin = async (req: Request, res: Response) => {
@@ -146,38 +195,27 @@ export const CreateAdmin = async (req: Request, res: Response) => {
   }
   try {
     const { firstName, email, lastName, fullName, Password } = req.body;
-    const normalizedFullName = fullName?.trim() || `${firstName || ""} ${lastName || ""}`.trim();
+    const normalizedFullName = normalizeFullName(firstName, lastName, fullName);
     if (!normalizedFullName || !email || !Password) {
       return res.status(401).json({
         message: "All fields required",
       });
     }
-    const authToken = req.authToken;
-    if (!authToken) {
-      return res.status(401).json({ message: "Access denied" });
-    }
-
-    const created = await createAuthUser(authToken, {
+    const userData = await createLocalUserRecord({
       email: String(email).toLowerCase(),
       password: String(Password),
       fullName: normalizedFullName,
       role: "Admin",
     });
-    const authUser = created.data?.user;
-    if (!authUser) {
-      return res.status(400).json({ message: "unable to create user" });
-    }
-
-    const UserData = await syncLocalShadowUser(authUser);
 
  return res.status(200).json({
       message: "registration was successful",
       success: 1,
       Result: {
-        _id: UserData?._id || authUser._id,
-        fullName: UserData?.fullName || authUser.fullName,
-        email: UserData?.email || authUser.email,
-        role: UserData?.role || "Admin",
+        _id: userData._id,
+        fullName: userData.fullName,
+        email: userData.email,
+        role: userData.role || "Admin",
       },
     });
      } catch (error: any) {
@@ -216,11 +254,21 @@ export const LoginUser = async (
       });
     }
 
-    const token = signLocalAccessToken({
+    const { token, jti, expiresAt } = createLocalSessionToken({
       _id: String(user._id),
       email: String(user.email || ""),
       fullName: String(user.fullName || ""),
       role: user.role,
+    });
+
+    await SessionModel.create({
+      user: user._id,
+      role: user.role,
+      jti,
+      active: true,
+      loginAt: new Date(),
+      lastSeenAt: new Date(),
+      expiresAt,
     });
 
     res.cookie("sessionId", token);
@@ -245,7 +293,7 @@ if(checkrole !== "Admin"){
 }
   try {
     const { firstName, email, lastName, fullName, Password } = req.body;
-    const normalizedFullName = fullName?.trim() || `${firstName || ""} ${lastName || ""}`.trim();
+    const normalizedFullName = normalizeFullName(firstName, lastName, fullName);
     if (!normalizedFullName || !email || !Password) {
       return res.status(401).json({
         message: "All fields required",
@@ -253,24 +301,16 @@ if(checkrole !== "Admin"){
     }
 
     const adminId = req.user?._id;
-    const authToken = req.authToken;
-    if (!adminId || !authToken) {
+    if (!adminId) {
       return res.status(401).json({
         message: "Access denied",
       });
     }
-    const created = await createAuthUser(authToken, {
+    const userData = await createLocalUserRecord({
       email: String(email).toLowerCase(),
       password: String(Password),
       fullName: normalizedFullName,
       role: "User",
-    });
-    const authUser = created.data?.user;
-    if (!authUser) {
-      return res.status(400).json({ message: "unable to create user" });
-    }
-
-    const UserData = await syncLocalShadowUser(authUser, {
       createdByAdmin: adminId,
       addCreatedUserToAdminId: adminId,
     });
@@ -279,10 +319,10 @@ if(checkrole !== "Admin"){
       message: "registration was successful",
       success: 1,
       Result: {
-        _id: UserData?._id || authUser._id,
-        fullName: UserData?.fullName || authUser.fullName,
-        email: UserData?.email || authUser.email,
-        role: UserData?.role || "User",
+        _id: userData._id,
+        fullName: userData.fullName,
+        email: userData.email,
+        role: userData.role || "User",
       },
     });
      } catch (error: any) {
@@ -336,17 +376,10 @@ export const GetAllUsers = async (req: Request, res: Response) => {
       });
     }
     else{
-      const authToken = req.authToken;
-      if (!authToken) {
-        return res.status(401).json({ message: "Access denied" });
-      }
-      const payload = await listAuthUsers(authToken, { page: 1, limit: 200 });
-      const authUsers = Array.isArray(payload.data) ? payload.data : [];
-      const users = [];
-      for (const authUser of authUsers) {
-        const localUser = await syncLocalShadowUser(authUser);
-        users.push(localUser);
-      }
+      const users = await UserModel.find()
+        .select("-password")
+        .populate("createdByAdmin", "fullName email role")
+        .lean();
       return res.status(200).json({
         message: "Users retrieved successfully",
         data: users,
@@ -449,8 +482,7 @@ export const CreateEasyBoughtItem = async (req: Request, res: Response) => {
 
     try {
     const CheckUseremail = req.user?.email;
-    const authToken = req.authToken;
-    if (!CheckUseremail || !authToken) {
+    if (!CheckUseremail) {
       return res.status(401).json({
         message: "Access denied",
       });
@@ -538,10 +570,7 @@ export const CreateEasyBoughtItem = async (req: Request, res: Response) => {
       });
     }
 
-    const authUser = await findAuthUserByEmail(authToken, resolvedUserEmail);
-    const getUser = authUser
-      ? await syncLocalShadowUser(authUser)
-      : null;
+    const getUser = await UserModel.findOne({ email: resolvedUserEmail.toLowerCase() }).lean();
     if(!getUser){
       return res.status(404).json({
         message: "User does not exist",
@@ -621,6 +650,20 @@ export const LogoutUser = async (req: Request, res: Response) => {
 
 
     try {
+      const userId = req.user?._id;
+      const jti = req.user?.jti;
+      if (userId && jti) {
+        await SessionModel.updateOne(
+          { user: userId, jti, active: true },
+          {
+            $set: {
+              active: false,
+              logoutAt: new Date(),
+              lastSeenAt: new Date(),
+            },
+          }
+        );
+      }
       res.clearCookie("sessionId");
       return res.status(200).json({
         message: "Logout successful",

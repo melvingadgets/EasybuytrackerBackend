@@ -1,7 +1,8 @@
 import type { NextFunction, Request, Response } from "express";
 import jwt, { type JwtPayload } from "jsonwebtoken";
+import SessionModel from "../Model/SessionModel.js";
+import UserModel from "../Model/UserModel.js";
 import { config } from "../config/Config.js";
-import { syncLocalShadowUser, toLegacyRole } from "../Service/AuthService.js";
 
 type AppRole = "Admin" | "User" | "SuperAdmin";
 
@@ -47,26 +48,39 @@ export const verifyToken = async (req: Request, res: Response, next: NextFunctio
       return res.status(401).json({ message: "invalid token payload" });
     }
 
-    const normalizedRole = toLegacyRole(String(payload.role || ""));
-    const normalizedName = String(payload.fullName || payload.userName || "");
+    const user = await UserModel.findById(payload._id)
+      .select({ _id: 1, fullName: 1, email: 1, role: 1 })
+      .lean();
+    if (!user) {
+      return res.status(401).json({ message: "user not found" });
+    }
 
-    await syncLocalShadowUser({
-      _id: String(payload._id),
-      email: String(payload.email || ""),
-      fullName: normalizedName,
-      role:
-        normalizedRole === "Admin"
-          ? "admin"
-          : normalizedRole === "SuperAdmin"
-            ? "superadmin"
-            : "user",
-    });
+    if (payload.jti) {
+      const activeSession = await SessionModel.findOneAndUpdate(
+        {
+          user: user._id,
+          jti: String(payload.jti),
+          active: true,
+          expiresAt: { $gt: new Date() },
+        },
+        {
+          $set: {
+            lastSeenAt: new Date(),
+          },
+        },
+        { returnDocument: "after" }
+      ).lean();
+
+      if (!activeSession) {
+        return res.status(401).json({ message: "session expired" });
+      }
+    }
 
     const currentUser: Request["user"] = {
-      _id: String(payload._id),
-      userName: normalizedName,
-      email: String(payload.email || ""),
-      role: normalizedRole,
+      _id: String(user._id),
+      userName: String(user.fullName || payload.fullName || payload.userName || ""),
+      email: String(user.email || payload.email || ""),
+      role: String(user.role || "User") as AppRole,
     };
     if (payload.jti) {
       currentUser.jti = String(payload.jti);

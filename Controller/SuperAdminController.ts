@@ -11,13 +11,6 @@ import PublicEasyBuyRequestModel from "../Model/PublicEasyBuyRequestModel.js";
 import ReceiptModel from "../Model/ReceiptModel.js";
 import SessionModel from "../Model/SessionModel.js";
 import UserModel from "../Model/UserModel.js";
-import {
-  deleteAuthUser,
-  findAuthUserByEmail,
-  getAuthSessionStats,
-  listAuthUsers,
-  syncLocalShadowUser,
-} from "../Service/AuthService.js";
 import { EASYBUY_CATALOG, normalizeCapacityInput } from "../Utils/EasyBuyCatalog.js";
 import { normalizePricingUpdateInput } from "../Utils/EasyBuyPricing.js";
 import { appendPricingProviderFilter, sortPricingDocsByProviderPrecedence } from "../Utils/providers/helpers.js";
@@ -74,23 +67,7 @@ const parsePositiveNumber = (value: unknown, fieldName: string): number => {
 
 export const SuperAdminGetAllUsers = async (_req: Request, res: Response) => {
   try {
-    const authToken = _req.authToken;
-    if (!authToken) {
-      return res.status(401).json({ message: "Access denied" });
-    }
-
-    const payload = await listAuthUsers(authToken, { page: 1, limit: 500 });
-    const authUsers = Array.isArray(payload.data) ? payload.data : [];
-    const localUsers = [];
-    for (const authUser of authUsers) {
-      const synced = await syncLocalShadowUser(authUser);
-      localUsers.push(synced);
-    }
-
-    const userIds = localUsers
-      .map((user) => user?._id)
-      .filter((value): value is string => Boolean(value));
-    const users = await UserModel.find({ _id: { $in: userIds } })
+    const users = await UserModel.find()
       .select("-password")
       .populate("createdByAdmin", "fullName email role")
       .lean();
@@ -110,17 +87,6 @@ export const SuperAdminGetAllUsers = async (_req: Request, res: Response) => {
 
 export const SuperAdminGetUsersWithEasyBoughtItems = async (req: Request, res: Response) => {
   try {
-    const authToken = req.authToken;
-    if (!authToken) {
-      return res.status(401).json({ message: "Access denied" });
-    }
-
-    const payload = await listAuthUsers(authToken, { page: 1, limit: 500 });
-    const authUsers = Array.isArray(payload.data) ? payload.data : [];
-    for (const authUser of authUsers) {
-      await syncLocalShadowUser(authUser);
-    }
-
     const users = await UserModel.find().select("-password").lean();
     if (!users.length) {
       return res.status(200).json({
@@ -162,10 +128,9 @@ export const SuperAdminGetUsersWithEasyBoughtItems = async (req: Request, res: R
 export const SuperAdminDeleteUserOrAdmin = async (req: Request, res: Response) => {
   const actorId = req.user?._id;
   const actorRole = req.user?.role;
-  const authToken = req.authToken;
   const { userId } = req.params;
 
-  if (!actorId || actorRole !== "SuperAdmin" || !authToken) {
+  if (!actorId || actorRole !== "SuperAdmin") {
     return res.status(401).json({
       message: "Access denied",
     });
@@ -188,23 +153,12 @@ export const SuperAdminDeleteUserOrAdmin = async (req: Request, res: Response) =
   const session = await mongoose.startSession();
 
   try {
-    const deletedAuthUserPayload = await deleteAuthUser(authToken, String(userId));
-    const deletedAuthUser = deletedAuthUserPayload.data;
-    if (!deletedAuthUser) {
+    const targetUser = await UserModel.findById(userId)
+      .select({ _id: 1, role: 1, email: 1, fullName: 1 })
+      .lean();
+    if (!targetUser) {
       return res.status(404).json({ message: "User not found" });
     }
-
-    const targetUser = {
-      _id: deletedAuthUser._id,
-      role:
-        deletedAuthUser.role === "admin"
-          ? "Admin"
-          : deletedAuthUser.role === "superadmin"
-            ? "SuperAdmin"
-            : "User",
-      email: deletedAuthUser.email,
-      fullName: deletedAuthUser.fullName,
-    };
 
     if (!["User", "Admin"].includes(targetUser.role)) {
       return res.status(403).json({
@@ -1021,8 +975,7 @@ export const SuperAdminRejectPublicEasyBuyRequest = async (req: Request, res: Re
 export const SuperAdminConvertPublicEasyBuyRequest = async (req: Request, res: Response) => {
   const actorId = req.user?._id;
   const actorRole = req.user?.role;
-  const authToken = req.authToken;
-  if (!actorId || actorRole !== "SuperAdmin" || !authToken) {
+  if (!actorId || actorRole !== "SuperAdmin") {
     return res.status(401).json({ message: "Access denied" });
   }
 
@@ -1074,8 +1027,9 @@ export const SuperAdminConvertPublicEasyBuyRequest = async (req: Request, res: R
         throw new Error("userEmail is required");
       }
 
-      const authUser = await findAuthUserByEmail(authToken, resolvedUserEmail);
-      const user = authUser ? await syncLocalShadowUser(authUser) : null;
+      const user = await UserModel.findOne({ email: resolvedUserEmail })
+        .select({ _id: 1, email: 1, fullName: 1, role: 1 })
+        .lean();
       if (!user) {
         throw new Error("No existing user found for this email. Create user account first.");
       }
@@ -1203,20 +1157,40 @@ export const SuperAdminConvertPublicEasyBuyRequest = async (req: Request, res: R
 
 export const SuperAdminGetLoginStats = async (req: Request, res: Response) => {
   try {
-    const authToken = req.authToken;
-    if (!authToken) {
-      return res.status(401).json({ message: "Access denied" });
-    }
-    const stats = await getAuthSessionStats(authToken);
-    const data = stats.data;
+    const grouped = await SessionModel.aggregate([
+      {
+        $match: {
+          active: true,
+          expiresAt: { $gt: new Date() },
+        },
+      },
+      {
+        $group: {
+          _id: "$role",
+          uniqueUsers: { $addToSet: "$user" },
+        },
+      },
+      {
+        $project: {
+          _id: 0,
+          role: "$_id",
+          count: { $size: "$uniqueUsers" },
+        },
+      },
+    ]);
+
+    const counts = grouped.reduce<Record<string, number>>((acc, item) => {
+      acc[String(item.role || "")] = Number(item.count || 0);
+      return acc;
+    }, {});
 
     return res.status(200).json({
       message: "Login statistics retrieved successfully",
       data: {
-        usersLoggedIn: data?.usersLoggedIn || 0,
-        adminsLoggedIn: data?.adminsLoggedIn || 0,
-        superAdminsLoggedIn: data?.superAdminsLoggedIn || 0,
-        totalLoggedIn: data?.totalLoggedIn || 0,
+        usersLoggedIn: counts.User || 0,
+        adminsLoggedIn: counts.Admin || 0,
+        superAdminsLoggedIn: counts.SuperAdmin || 0,
+        totalLoggedIn: (counts.User || 0) + (counts.Admin || 0) + (counts.SuperAdmin || 0),
       },
     });
   } catch (error: any) {
