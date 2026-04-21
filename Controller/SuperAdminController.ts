@@ -4,6 +4,7 @@ import AuditLogModel from "../Model/AuditLogModel.js";
 import EasyBoughtItemModel from "../Model/EasyBoughtitem.js";
 import EasyBuyPlanModel from "../Model/EasyBuyPlanModel.js";
 import EasyBuyCapacityPriceModel from "../Model/EasyBuyCapacityPriceModel.js";
+import EasyBuyEventModel from "../Model/EasyBuyEventModel.js";
 import PaymentModel from "../Model/PaymentModel.js";
 import ProfileModel from "../Model/Profilemodel.js";
 import PublicEasyBuyDraftModel from "../Model/PublicEasyBuyDraftModel.js";
@@ -57,6 +58,47 @@ const normalizeString = (value: unknown): string => String(value ?? "").trim();
 const normalizeEmail = (value: unknown): string => normalizeString(value).toLowerCase();
 const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
+const tryParseUrl = (value: unknown): URL | null => {
+  const raw = normalizeString(value);
+  if (!raw) return null;
+
+  try {
+    return new URL(raw);
+  } catch {
+    try {
+      return new URL(raw, "https://easybuy.local");
+    } catch {
+      return null;
+    }
+  }
+};
+
+const normalizePathname = (value: unknown): string => {
+  const parsed = tryParseUrl(value);
+  const raw = normalizeString(parsed?.pathname || value);
+  if (!raw) return "";
+
+  const trimmed = raw.replace(/^\/+/, "");
+  return trimmed ? `/${trimmed}` : "/";
+};
+
+const buildPublicAnalyticsMatch = (params: { landingPath: string; providerSlug?: string }) => {
+  const pathPattern = `${escapeRegExp(params.landingPath)}(?:[/?#]|$)`;
+  const match: Record<string, unknown> = {
+    event: "page_view",
+    $or: [
+      { landingPath: params.landingPath },
+      { landingPage: { $regex: pathPattern, $options: "i" } },
+    ],
+  };
+
+  if (params.providerSlug) {
+    match.provider = params.providerSlug.toLowerCase();
+  }
+
+  return match;
+};
+
 const parsePositiveNumber = (value: unknown, fieldName: string): number => {
   const numeric = Number(value);
   if (!Number.isFinite(numeric) || numeric <= 0) {
@@ -64,6 +106,29 @@ const parsePositiveNumber = (value: unknown, fieldName: string): number => {
   }
   return Number(numeric.toFixed(2));
 };
+
+const buildWindowSummaryPipeline = (baseMatch: Record<string, unknown>, start: Date) => [
+  {
+    $match: {
+      ...baseMatch,
+      createdAt: { $gte: start },
+    },
+  },
+  {
+    $group: {
+      _id: null,
+      visits: { $sum: 1 },
+      anonymousIds: { $addToSet: "$anonymousId" },
+    },
+  },
+  {
+    $project: {
+      _id: 0,
+      visits: 1,
+      users: { $size: "$anonymousIds" },
+    },
+  },
+];
 
 export const SuperAdminGetAllUsers = async (_req: Request, res: Response) => {
   try {
@@ -703,6 +768,123 @@ export const SuperAdminUpdateEasyBuyPricing = async (req: Request, res: Response
   } catch (error: any) {
     return res.status(400).json({
       message: "Failed to update EasyBuy pricing",
+      reason: error?.message || "Unknown error",
+    });
+  }
+};
+
+export const SuperAdminGetPublicEasyBuyAnalytics = async (req: Request, res: Response) => {
+  try {
+    const providerSlug = normalizeString(req.query?.provider) || undefined;
+    const landingPathQuery = normalizePathname(req.query?.landingPath || req.query?.path);
+    const landingPath = landingPathQuery || "/apply";
+    const now = Date.now();
+
+    const windows = {
+      lastMinute: new Date(now - 60 * 1000),
+      lastHour: new Date(now - 60 * 60 * 1000),
+      lastDay: new Date(now - 24 * 60 * 60 * 1000),
+      lastWeek: new Date(now - 7 * 24 * 60 * 60 * 1000),
+      lastMonth: new Date(now - 30 * 24 * 60 * 60 * 1000),
+    };
+
+    const baseMatch = buildPublicAnalyticsMatch({
+      landingPath,
+      ...(providerSlug ? { providerSlug } : {}),
+    });
+
+    const [analytics] = await EasyBuyEventModel.aggregate([
+      {
+        $facet: {
+          lastMinute: buildWindowSummaryPipeline(baseMatch, windows.lastMinute),
+          lastHour: buildWindowSummaryPipeline(baseMatch, windows.lastHour),
+          lastDay: buildWindowSummaryPipeline(baseMatch, windows.lastDay),
+          lastWeek: buildWindowSummaryPipeline(baseMatch, windows.lastWeek),
+          lastMonth: buildWindowSummaryPipeline(baseMatch, windows.lastMonth),
+          topSources: [
+            {
+              $match: {
+                ...baseMatch,
+                createdAt: { $gte: windows.lastMonth },
+              },
+            },
+            {
+              $group: {
+                _id: { $ifNull: ["$source", "direct"] },
+                visits: { $sum: 1 },
+                anonymousIds: { $addToSet: "$anonymousId" },
+              },
+            },
+            {
+              $project: {
+                _id: 0,
+                source: "$_id",
+                visits: 1,
+                users: { $size: "$anonymousIds" },
+              },
+            },
+            { $sort: { users: -1, visits: -1, source: 1 } },
+            { $limit: 10 },
+          ],
+          topReferrers: [
+            {
+              $match: {
+                ...baseMatch,
+                createdAt: { $gte: windows.lastMonth },
+                referrerHost: { $nin: [null, ""] },
+              },
+            },
+            {
+              $group: {
+                _id: "$referrerHost",
+                visits: { $sum: 1 },
+                anonymousIds: { $addToSet: "$anonymousId" },
+              },
+            },
+            {
+              $project: {
+                _id: 0,
+                referrerHost: "$_id",
+                visits: 1,
+                users: { $size: "$anonymousIds" },
+              },
+            },
+            { $sort: { users: -1, visits: -1, referrerHost: 1 } },
+            { $limit: 10 },
+          ],
+        },
+      },
+    ]);
+
+    const readWindow = (key: keyof typeof windows) => {
+      const entry = analytics?.[key]?.[0];
+      return {
+        users: Number(entry?.users || 0),
+        visits: Number(entry?.visits || 0),
+        startAt: windows[key],
+      };
+    };
+
+    return res.status(200).json({
+      message: "Public EasyBuy analytics retrieved successfully",
+      data: {
+        landingPath,
+        provider: providerSlug || null,
+        queriedAt: new Date(now),
+        counts: {
+          lastMinute: readWindow("lastMinute"),
+          lastHour: readWindow("lastHour"),
+          lastDay: readWindow("lastDay"),
+          lastWeek: readWindow("lastWeek"),
+          lastMonth: readWindow("lastMonth"),
+        },
+        topSources: Array.isArray(analytics?.topSources) ? analytics.topSources : [],
+        topReferrers: Array.isArray(analytics?.topReferrers) ? analytics.topReferrers : [],
+      },
+    });
+  } catch (error: any) {
+    return res.status(400).json({
+      message: "Failed to retrieve public EasyBuy analytics",
       reason: error?.message || "Unknown error",
     });
   }

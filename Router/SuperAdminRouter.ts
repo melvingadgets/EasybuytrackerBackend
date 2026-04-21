@@ -4,6 +4,7 @@ import {
   SuperAdminDeleteUserOrAdmin,
   SuperAdminGetAllUsers,
   SuperAdminGetLoginStats,
+  SuperAdminGetPublicEasyBuyAnalytics,
   SuperAdminListAbandonedPublicEasyBuyDrafts,
   SuperAdminListPublicEasyBuyRequests,
   SuperAdminApprovePublicEasyBuyRequest,
@@ -38,6 +39,12 @@ router.delete(
 router.get("/login-stats", verifyToken, requireRole(["SuperAdmin"]), SuperAdminGetLoginStats);
 router.get("/easybuy-pricing", verifyToken, requireRole(["SuperAdmin"]), SuperAdminGetEasyBuyPricing);
 router.patch("/easybuy-pricing", verifyToken, requireRole(["SuperAdmin"]), SuperAdminUpdateEasyBuyPricing);
+router.get(
+  "/public-easybuy-analytics",
+  verifyToken,
+  requireRole(["SuperAdmin"]),
+  SuperAdminGetPublicEasyBuyAnalytics
+);
 router.get(
   "/public-easybuy-abandoned-drafts",
   verifyToken,

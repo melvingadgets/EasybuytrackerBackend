@@ -204,6 +204,52 @@ const normalizePositiveInteger = (value: unknown): number => {
   return Math.floor(numeric);
 };
 
+const tryParseUrl = (value: unknown): URL | null => {
+  const raw = normalizeString(value);
+  if (!raw) return null;
+
+  try {
+    return new URL(raw);
+  } catch {
+    try {
+      return new URL(raw, "https://easybuy.local");
+    } catch {
+      return null;
+    }
+  }
+};
+
+const normalizePathname = (value: unknown): string => {
+  const parsed = tryParseUrl(value);
+  const raw = normalizeString(parsed?.pathname || value);
+  if (!raw) return "";
+
+  const trimmed = raw.replace(/^\/+/, "");
+  return trimmed ? `/${trimmed}` : "/";
+};
+
+const normalizeTrackingContext = (params: {
+  utmSource?: unknown;
+  referrer?: unknown;
+  landingPage?: unknown;
+}) => {
+  const utmSource = normalizeString(params.utmSource);
+  const referrer = normalizeString(params.referrer);
+  const landingPage = normalizeString(params.landingPage);
+  const referrerHost = normalizeString(tryParseUrl(referrer)?.hostname).toLowerCase();
+  const landingPath = normalizePathname(landingPage);
+  const source = normalizeString(utmSource || referrerHost || "direct").toLowerCase();
+
+  return {
+    utmSource,
+    referrer,
+    referrerHost,
+    landingPage,
+    landingPath,
+    source,
+  };
+};
+
 export const GetPublicEasyBuyCatalog = async (req: Request, res: Response) => {
   const ipAddress = getClientIp(req);
   const limiterKey = `${ipAddress}::${normalizeString(req.headers["user-agent"])}`;
@@ -604,7 +650,7 @@ export const GetPublicProviders = async (req: Request, res: Response) => {
 
 export const TrackPublicEvent = async (req: Request, res: Response) => {
   try {
-    const anonymousId = normalizeString(req.body?.anonymousId);
+    const anonymousId = ensureAnonymousId(req, res);
     const event = normalizeString(req.body?.event);
 
     if (!anonymousId || !PUBLIC_EVENT_TYPES.includes(event as (typeof PUBLIC_EVENT_TYPES)[number])) {
@@ -615,13 +661,21 @@ export const TrackPublicEvent = async (req: Request, res: Response) => {
 
     const provider = String(req.body?.provider || "").trim().toLowerCase() || undefined;
     const meta = isPlainObject(req.body?.meta) ? req.body.meta : {};
-    const utmSource = normalizeString(req.body?.utmSource) || undefined;
     const utmMedium = normalizeString(req.body?.utmMedium) || undefined;
     const utmCampaign = normalizeString(req.body?.utmCampaign) || undefined;
     const utmTerm = normalizeString(req.body?.utmTerm) || undefined;
     const utmContent = normalizeString(req.body?.utmContent) || undefined;
-    const referrer = normalizeString(req.body?.referrer) || undefined;
-    const landingPage = normalizeString(req.body?.landingPage) || undefined;
+    const trackingContext = normalizeTrackingContext({
+      utmSource: req.body?.utmSource,
+      referrer: req.body?.referrer || req.headers.referer,
+      landingPage: req.body?.landingPage,
+    });
+    const utmSource = trackingContext.utmSource || undefined;
+    const referrer = trackingContext.referrer || undefined;
+    const referrerHost = trackingContext.referrerHost || undefined;
+    const landingPage = trackingContext.landingPage || undefined;
+    const landingPath = trackingContext.landingPath || undefined;
+    const source = trackingContext.source || undefined;
 
     await EasyBuyEventModel.create({
       anonymousId,
@@ -634,7 +688,10 @@ export const TrackPublicEvent = async (req: Request, res: Response) => {
       ...(utmTerm ? { utmTerm } : {}),
       ...(utmContent ? { utmContent } : {}),
       ...(referrer ? { referrer } : {}),
+      ...(referrerHost ? { referrerHost } : {}),
       ...(landingPage ? { landingPage } : {}),
+      ...(landingPath ? { landingPath } : {}),
+      ...(source ? { source } : {}),
     });
 
     return res.status(200).json({ message: "ok" });
