@@ -13,6 +13,11 @@ declare global {
     interface Request {
       user?: User;
       authToken?: string;
+      traceId?: string;
+      // Set by service-token verification once services authenticate to each other.
+      service?: {
+        id: string;
+      };
     }
   }
 }

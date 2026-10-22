@@ -6,9 +6,11 @@ import receiptRouter from "./Router/ReceiptRouter.js";
 import profileRouter from "./Router/Profilerouter.js";
 import superAdminRouter from "./Router/SuperAdminRouter.js";
 import publicRouter from "./Router/PublicRouter.js";
+import { requestLog } from "./Middleware/requestLog.js";
 
 
 export const MainApp = (app: Application) => {
+  app.use(requestLog("easybuy"));
   app.use(express.json());
   app.use(cors());
   app.get("/api/v1", (req, res) => {
