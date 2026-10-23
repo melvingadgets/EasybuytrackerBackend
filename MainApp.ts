@@ -6,10 +6,14 @@ import receiptRouter from "./Router/ReceiptRouter.js";
 import profileRouter from "./Router/Profilerouter.js";
 import superAdminRouter from "./Router/SuperAdminRouter.js";
 import publicRouter from "./Router/PublicRouter.js";
+import { createInternalRouter } from "./Router/InternalRouter.js";
 import { requestLog } from "./Middleware/requestLog.js";
+import { platformVerifier } from "./Utils/platform.js";
 
 
 export const MainApp = (app: Application) => {
+  // One proxy hop on Railway; without this req.ip is the proxy's address.
+  app.set("trust proxy", 1);
   app.use(requestLog("easybuy"));
   app.use(express.json());
   app.use(cors());
@@ -24,6 +28,7 @@ export const MainApp = (app: Application) => {
  app.use("/api/v1/profile", profileRouter);
  app.use("/api/v1/superadmin", superAdminRouter);
  app.use("/api/v1/public", publicRouter);
+ app.use("/api/v1/internal", createInternalRouter(platformVerifier));
   
 
 

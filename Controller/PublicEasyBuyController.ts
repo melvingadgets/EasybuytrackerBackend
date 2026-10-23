@@ -141,7 +141,8 @@ const isRateLimited = (
   return existing.count > maxRequests;
 };
 
-const buildSafePublicCatalog = async (provider: FinanceProvider): Promise<PublicCatalogPayload> => {
+// Also serves the service-token catalog in InternalController (one source of catalog truth).
+export const buildSafePublicCatalog = async (provider: FinanceProvider): Promise<PublicCatalogPayload> => {
   const cached = catalogCacheMap.get(provider.slug);
   if (cached && cached.expiresAt > Date.now()) {
     return cached.payload;

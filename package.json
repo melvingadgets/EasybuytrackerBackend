@@ -4,13 +4,15 @@
   "main": "server.ts",
   "type": "module",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "dev": "tsx Server.ts"
+    "test": "vitest run",
+    "dev": "tsx Server.ts",
+    "typecheck": "tsc --noEmit -p ."
   },
   "author": "",
   "license": "ISC",
   "description": "",
   "dependencies": {
+    "@melvingadgets/platform-kit": "0.3.0",
     "@types/bcrypt": "^6.0.0",
     "@types/cors": "^2.8.19",
     "bcrypt": "^6.0.0",
@@ -28,12 +30,15 @@
   },
   "devDependencies": {
     "@types/ejs": "^3.1.5",
-    "@types/multer": "^2.0.0",
-    "@types/nodemailer": "^7.0.2",
     "@types/express": "^5.0.6",
     "@types/jsonwebtoken": "^9.0.10",
+    "@types/multer": "^2.0.0",
     "@types/node": "^25.3.0",
+    "@types/nodemailer": "^7.0.2",
+    "@types/supertest": "^7.2.1",
+    "supertest": "^7.3.1",
     "tsx": "^4.21.0",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "vitest": "^5.0.5"
   }
 }

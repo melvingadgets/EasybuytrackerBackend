@@ -1,4 +1,5 @@
 import { Request } from 'express';
+import type { ServiceCaller, UserCaller } from '@melvingadgets/platform-kit';
 
 interface User {
   _id: string;
@@ -14,10 +15,12 @@ declare global {
       user?: User;
       authToken?: string;
       traceId?: string;
-      // Set by service-token verification once services authenticate to each other.
-      service?: {
-        id: string;
-      };
+      // A calling service, verified from its service token by the platform kit's guards.
+      service?: ServiceCaller;
+      // A person verified from a platform user token.
+      person?: UserCaller;
+      // Set by the platform kit's guards; the request log records only verified callers.
+      caller?: { type: "service" | "user" | "anonymous"; id?: string };
     }
   }
 }

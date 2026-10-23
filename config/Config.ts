@@ -16,6 +16,10 @@ const mailFrom = String(process.env.MAIL_FROM ?? '').trim()
 const cloudinaryCloudName = String(process.env.CLOUDINARY_CLOUD_NAME ?? '').trim()
 const cloudinaryApiKey = String(process.env.CLOUDINARY_API_KEY ?? '').trim()
 const cloudinaryApiSecret = String(process.env.CLOUDINARY_API_SECRET ?? '').trim()
+// Platform tokens (Shortwork/AGENTS.md §2): the auth service's public URL is the token
+// issuer, and its JWKS holds the keys. Unset leaves the service-token routes answering 503.
+const authIssuer = String(process.env.AUTH_ISSUER ?? '').trim().replace(/\/+$/, '')
+const authJwksUrl = String(process.env.AUTH_JWKS_URL ?? (authIssuer ? `${authIssuer}/.well-known/jwks.json` : '')).trim()
 
 
 const missingVars: string[] = []
@@ -46,6 +50,8 @@ export const config = {
     serviceUrl: authServiceUrl,
     jwtSecret: authJwtSecret,
     serviceKey: authServiceKey,
+    issuer: authIssuer,
+    jwksUrl: authJwksUrl,
   },
   mail: {
     provider: mailProvider as 'smtp' | 'resend',
