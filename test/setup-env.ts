@@ -1,7 +1,10 @@
 // Config.ts reads and validates the environment at import time; give it test values.
 import { randomUUID } from "crypto";
 
-process.env.Database_url = `${process.env.MONGO_TEST_URL ?? "mongodb://127.0.0.1:27017"}/easybuy_u2_test_${randomUUID().slice(0, 8)}`;
+// A replica set: the outbox needs multi-document transactions (as Atlas provides in production).
+const host = process.env.MONGO_RS_HOST ?? "127.0.0.1:27028";
+process.env.Database_url = `mongodb://${host}/easybuy_test_${randomUUID().slice(0, 8)}?directConnection=true`;
+process.env.EVENTS_ENABLED = "true";
 process.env.PORT = "0";
 process.env.JWT_SECRET = "easybuy-test-secret";
 process.env.MAIL_FROM = "test@example.com";

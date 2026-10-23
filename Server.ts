@@ -4,6 +4,7 @@ import { config } from "./config/Config.js";
 import { MainApp } from "./MainApp.js";
 import path from "path";
 import Db from "./Database/Database.js";
+import { initOutbox } from "./Utils/messaging.js";
 import type { Server } from "http";
 
 const port = config.port;
@@ -16,6 +17,7 @@ let server: Server;
 async function startserver() {
   try {
     await Db;
+    await initOutbox();
     server = app.listen(port, () => {
       console.log(`server is listening on port: ${port}`);
     });

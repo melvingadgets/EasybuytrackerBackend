@@ -16,6 +16,9 @@ import { EASYBUY_CATALOG, normalizeCapacityInput } from "../Utils/EasyBuyCatalog
 import { normalizePricingUpdateInput } from "../Utils/EasyBuyPricing.js";
 import { appendPricingProviderFilter, sortPricingDocsByProviderPrecedence } from "../Utils/providers/helpers.js";
 import { getDefaultProvider, resolveProvider } from "../Utils/providers/registry.js";
+import { inTransaction, publishInTransaction, easybuyPriceUpdated, nairaToKobo } from "@melvingadgets/platform-kit";
+import { mongoClient, rawDb } from "../Utils/messaging.js";
+import { config } from "../config/Config.js";
 
 const normalizeReason = (value: unknown) => {
   const trimmed = String(value ?? "").trim();
@@ -753,7 +756,38 @@ export const SuperAdminUpdateEasyBuyPricing = async (req: Request, res: Response
   }));
 
   try {
-    if (bulkOperations.length) {
+    if (bulkOperations.length && config.eventsEnabled) {
+      // Price change + its event in one transaction (Shortwork/AGENTS.md §3.1). One event per
+      // row whose selling price actually changed; money leaves as integer kobo (§4.1).
+      const items = Array.from(validatedUpdates.values());
+      const previous = await EasyBuyCapacityPriceModel.find({
+        provider: provider.slug,
+        $or: items.map((item) => ({ model: item.model, capacity: item.capacity })),
+      })
+        .select({ model: 1, capacity: 1, price: 1, _id: 0 })
+        .lean();
+      const previousByKey = new Map(previous.map((row) => [`${row.model}__${row.capacity}`, Number(row.price)]));
+      const changed = items.filter((item) => previousByKey.get(`${item.model}__${item.capacity}`) !== item.price);
+      const db = rawDb();
+
+      await inTransaction(mongoClient(), async (session) => {
+        await EasyBuyCapacityPriceModel.bulkWrite(bulkOperations, { ordered: false, session: session as never });
+        for (const item of changed) {
+          const prior = previousByKey.get(`${item.model}__${item.capacity}`);
+          await publishInTransaction(db, session, easybuyPriceUpdated, {
+            subject: { kind: "price", id: `${provider.slug}:${item.model}:${item.capacity}` },
+            traceId: req.traceId ?? "00000000-0000-0000-0000-000000000000",
+            data: {
+              provider: provider.slug,
+              model: item.model,
+              capacity: item.capacity,
+              priceKobo: nairaToKobo(String(item.price)),
+              previousPriceKobo: prior === undefined ? null : nairaToKobo(String(prior)),
+            },
+          });
+        }
+      });
+    } else if (bulkOperations.length) {
       await EasyBuyCapacityPriceModel.bulkWrite(bulkOperations, { ordered: false });
     }
 

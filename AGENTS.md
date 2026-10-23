@@ -9,5 +9,6 @@
   - Each route needs a platform service token with its own scope: `catalog` → `easybuy:catalog.read`, `quote` → `easybuy:quote.read`.
   - Money here is integer kobo only. Quotes come from the kit's `quoteInstalments`, never a local copy of the formula.
   - These routes skip the public per-IP limits; the token is the gate. `AUTH_ISSUER` unset → 503.
-- **Tests:** `npm test` (vitest) uses a throwaway database on the local MongoDB and drops it afterwards.
+- **Events (U3):** when `EVENTS_ENABLED=true`, a SuperAdmin price change writes its `easybuy.price.updated` event to the `outbox` in the same transaction as the price row (`SuperAdminController.ts`). One event per row whose price actually changed; money in kobo. Off by default (additive rollout); needs a replica set (Atlas is one). `Utils/messaging.ts` bridges mongoose to the kit's outbox helpers.
+- **Tests:** `npm test` (vitest) needs a replica set (`MONGO_RS_HOST`, default `127.0.0.1:27028`) for the outbox transaction tests; it drops its throwaway database afterwards.
 - **Known risks to fix, not copy:** money stored as floats (rules §4); the check-then-create for "one active item per person" in `CreateEasyBoughtItem` (rules §3.8).

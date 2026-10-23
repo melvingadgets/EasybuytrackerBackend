@@ -20,6 +20,9 @@ const cloudinaryApiSecret = String(process.env.CLOUDINARY_API_SECRET ?? '').trim
 // issuer, and its JWKS holds the keys. Unset leaves the service-token routes answering 503.
 const authIssuer = String(process.env.AUTH_ISSUER ?? '').trim().replace(/\/+$/, '')
 const authJwksUrl = String(process.env.AUTH_JWKS_URL ?? (authIssuer ? `${authIssuer}/.well-known/jwks.json` : '')).trim()
+// Publish domain events to the outbox (Shortwork/AGENTS.md §3). Off by default so the rollout is
+// additive (§7.1); needs a replica set (Atlas is one). Turn on once the relay is running.
+const eventsEnabled = String(process.env.EVENTS_ENABLED ?? '').trim().toLowerCase() === 'true'
 
 
 const missingVars: string[] = []
@@ -53,6 +56,7 @@ export const config = {
     issuer: authIssuer,
     jwksUrl: authJwksUrl,
   },
+  eventsEnabled,
   mail: {
     provider: mailProvider as 'smtp' | 'resend',
     mailFrom,
