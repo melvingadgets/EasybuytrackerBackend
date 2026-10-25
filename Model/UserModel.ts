@@ -41,13 +41,10 @@ const UserSchema = new mongoose.Schema(
       enum: ["User", "Admin", "SuperAdmin"],
       default: "User",
     },
-    // Unique when set; sparse so legacy rows without it coexist.
+    // No default on purpose: a missing field must stay missing. A stored null would count as a
+    // value in the unique index below, and the second account without a personId would collide.
     personId: {
       type: String,
-      default: null,
-      unique: true,
-      sparse: true,
-      index: true,
     },
     createdUsers: [
       {
@@ -69,4 +66,7 @@ const UserSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
+// One account per person, enforced only for accounts that have a personId. A partial index, not a
+// sparse one: sparse still indexes an explicit null, partial skips everything that isn't a string.
+UserSchema.index({ personId: 1 }, { unique: true, partialFilterExpression: { personId: { $type: "string" } } });
 export default mongoose.model<Iuser>("user", UserSchema);
