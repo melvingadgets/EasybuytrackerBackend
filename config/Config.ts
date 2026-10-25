@@ -4,7 +4,14 @@ dotenv.config()
 const dbUrl = process.env.Database_url ?? process.env.DATABASE_URL
 const portValue = process.env.PORT ?? process.env.port
 const jwtSecret = String(process.env.JWT_SECRET ?? '').trim()
-const authServiceUrl = String(process.env.AUTH_SERVICE_URL ?? 'http://localhost:5500').trim().replace(/\/$/, '')
+// Platform tokens (Shortwork/AGENTS.md §2): the auth service's public URL is the token
+// issuer, and its JWKS holds the keys. Unset leaves the service-token routes answering 503.
+const authIssuer = String(process.env.AUTH_ISSUER ?? '').trim().replace(/\/+$/, '')
+// Where calls to the auth service go (profile lookup on a person's first unified login). Defaults to
+// the issuer, which is that same service, so production needs no second variable; a blank
+// AUTH_SERVICE_URL counts as unset. Local development still falls back to the dev auth service.
+const authServiceUrlRaw = String(process.env.AUTH_SERVICE_URL ?? '').trim()
+const authServiceUrl = (authServiceUrlRaw || authIssuer || 'http://localhost:5500').replace(/\/+$/, '')
 const authJwtSecret = String(process.env.AUTH_JWT_SECRET ?? jwtSecret).trim()
 const authServiceKey = String(process.env.AUTH_SERVICE_KEY ?? '').trim()
 const mailProviderRaw = String(process.env.MAIL_PROVIDER ?? 'smtp').trim().toLowerCase()
@@ -16,9 +23,6 @@ const mailFrom = String(process.env.MAIL_FROM ?? '').trim()
 const cloudinaryCloudName = String(process.env.CLOUDINARY_CLOUD_NAME ?? '').trim()
 const cloudinaryApiKey = String(process.env.CLOUDINARY_API_KEY ?? '').trim()
 const cloudinaryApiSecret = String(process.env.CLOUDINARY_API_SECRET ?? '').trim()
-// Platform tokens (Shortwork/AGENTS.md §2): the auth service's public URL is the token
-// issuer, and its JWKS holds the keys. Unset leaves the service-token routes answering 503.
-const authIssuer = String(process.env.AUTH_ISSUER ?? '').trim().replace(/\/+$/, '')
 const authJwksUrl = String(process.env.AUTH_JWKS_URL ?? (authIssuer ? `${authIssuer}/.well-known/jwks.json` : '')).trim()
 // Publish domain events to the outbox (Shortwork/AGENTS.md §3). Off by default so the rollout is
 // additive (§7.1); needs a replica set (Atlas is one). Turn on once the relay is running.
