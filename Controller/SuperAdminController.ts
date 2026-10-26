@@ -19,6 +19,8 @@ import { getDefaultProvider, resolveProvider } from "../Utils/providers/registry
 import { inTransaction, publishInTransaction, easybuyPriceUpdated, nairaToKobo } from "@melvingadgets/platform-kit";
 import { mongoClient, rawDb } from "../Utils/messaging.js";
 import { config } from "../config/Config.js";
+import { publishItemCreated, publishRequestReviewed, traceIdOf } from "../Utils/journeyEvents.js";
+import { computeServiceFee, toKobo } from "../Utils/serviceFee.js";
 
 const normalizeReason = (value: unknown) => {
   const trimmed = String(value ?? "").trim();
@@ -1067,18 +1069,27 @@ export const SuperAdminApprovePublicEasyBuyRequest = async (req: Request, res: R
   const reason = normalizeReason(req.body?.reason);
 
   try {
-    const updated = await PublicEasyBuyRequestModel.findOneAndUpdate(
-      { requestId, status: { $in: ["verified", "pending_verification"] } },
-      {
-        $set: {
-          status: "approved",
-          approvedAt: new Date(),
-          reviewedBy: new mongoose.Types.ObjectId(actorId),
-          reviewedAt: new Date(),
+    const approve = (session?: unknown) =>
+      PublicEasyBuyRequestModel.findOneAndUpdate(
+        { requestId, status: { $in: ["verified", "pending_verification"] } },
+        {
+          $set: {
+            status: "approved",
+            approvedAt: new Date(),
+            reviewedBy: new mongoose.Types.ObjectId(actorId),
+            reviewedAt: new Date(),
+          },
         },
-      },
-      { returnDocument: "after" }
-    ).lean();
+        { returnDocument: "after", ...(session ? { session: session as never } : {}) }
+      ).lean();
+    // The status change and its easybuy.request.approved event commit together (AGENTS.md §3.1).
+    const updated = config.eventsEnabled
+      ? await inTransaction(mongoClient(), async (session) => {
+          const doc = await approve(session);
+          if (doc) await publishRequestReviewed(session, traceIdOf(req), "approved", doc);
+          return doc;
+        })
+      : await approve();
 
     if (!updated) {
       const existing = await PublicEasyBuyRequestModel.findOne({ requestId })
@@ -1136,19 +1147,28 @@ export const SuperAdminRejectPublicEasyBuyRequest = async (req: Request, res: Re
   }
 
   try {
-    const updated = await PublicEasyBuyRequestModel.findOneAndUpdate(
-      { requestId, status: { $in: ["pending_verification", "verified", "approved"] } },
-      {
-        $set: {
-          status: "rejected",
-          rejectedAt: new Date(),
-          rejectionReason,
-          reviewedBy: new mongoose.Types.ObjectId(actorId),
-          reviewedAt: new Date(),
+    const reject = (session?: unknown) =>
+      PublicEasyBuyRequestModel.findOneAndUpdate(
+        { requestId, status: { $in: ["pending_verification", "verified", "approved"] } },
+        {
+          $set: {
+            status: "rejected",
+            rejectedAt: new Date(),
+            rejectionReason,
+            reviewedBy: new mongoose.Types.ObjectId(actorId),
+            reviewedAt: new Date(),
+          },
         },
-      },
-      { returnDocument: "after" }
-    ).lean();
+        { returnDocument: "after", ...(session ? { session: session as never } : {}) }
+      ).lean();
+    // The status change and its easybuy.request.rejected event commit together (AGENTS.md §3.1).
+    const updated = config.eventsEnabled
+      ? await inTransaction(mongoClient(), async (session) => {
+          const doc = await reject(session);
+          if (doc) await publishRequestReviewed(session, traceIdOf(req), "rejected", doc);
+          return doc;
+        })
+      : await reject();
 
     if (!updated) {
       const existing = await PublicEasyBuyRequestModel.findOne({ requestId })
@@ -1244,7 +1264,7 @@ export const SuperAdminConvertPublicEasyBuyRequest = async (req: Request, res: R
       }
 
       const user = await UserModel.findOne({ email: resolvedUserEmail })
-        .select({ _id: 1, email: 1, fullName: 1, role: 1 })
+        .select({ _id: 1, email: 1, fullName: 1, role: 1, personId: 1 })
         .lean();
       if (!user) {
         throw new Error("No existing user found for this email. Create user account first.");
@@ -1275,6 +1295,12 @@ export const SuperAdminConvertPublicEasyBuyRequest = async (req: Request, res: R
       const monthlyPlanNumber = Number(req.body?.monthlyPlan);
       const weeklyPlanNumber = Number(req.body?.weeklyPlan);
 
+      const loanedAmount = Number((phonePrice - downPayment).toFixed(2));
+      // The 8% service charge, fixed now and paid with the down payment (RESELLER-PLAN.md §8b).
+      const fee = computeServiceFee({ phonePrice, loanedAmount });
+      // The applicant's person: from the Apply request (a verified token), else the linked account.
+      const personId = String((requestDoc as any).personId || (user as any).personId || "") || null;
+
       const payload: Record<string, unknown> = {
         provider: provider.slug,
         IphoneModel: iphoneModel,
@@ -1282,10 +1308,15 @@ export const SuperAdminConvertPublicEasyBuyRequest = async (req: Request, res: R
         capacity,
         Plan: plan,
         downPayment: Number(downPayment.toFixed(2)),
-        loanedAmount: Number((phonePrice - downPayment).toFixed(2)),
+        loanedAmount,
         PhonePrice: phonePrice,
         UserId: user._id,
         UserEmail: resolvedUserEmail,
+        serviceFeeKobo: fee.serviceFeeKobo,
+        serviceFeeBps: fee.serviceFeeBps,
+        serviceFeeBase: fee.serviceFeeBase,
+        sourceRequestId: requestDoc.requestId,
+        ...(personId ? { personId } : {}),
       };
 
       if (plan === "Monthly") {
@@ -1306,6 +1337,24 @@ export const SuperAdminConvertPublicEasyBuyRequest = async (req: Request, res: R
       const createdItem = createdItems[0];
       if (!createdItem) {
         throw new Error("Failed to create EasyBought item");
+      }
+
+      // The device is handed over: the EasyBuy transaction is complete (RESELLER-PLAN.md R5).
+      // Its event commits with the item, in this same transaction (AGENTS.md §3.1).
+      if (config.eventsEnabled) {
+        await publishItemCreated(session, traceIdOf(req), {
+          itemId: String(createdItem._id),
+          requestId: requestDoc.requestId,
+          personId,
+          provider: provider.slug,
+          model: iphoneModel,
+          capacity,
+          plan,
+          phonePriceKobo: toKobo(phonePrice),
+          downPaymentKobo: toKobo(downPayment),
+          financedKobo: toKobo(loanedAmount),
+          fee,
+        });
       }
 
       requestDoc.status = "converted";

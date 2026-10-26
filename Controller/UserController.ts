@@ -16,6 +16,10 @@ import {
 } from "../Utils/providers/helpers.js";
 import { getDefaultProvider } from "../Utils/providers/registry.js";
 import type { CatalogEntry, FinanceProvider } from "../Utils/providers/types.js";
+import { inTransaction } from "@melvingadgets/platform-kit";
+import { publishItemCreated, traceIdOf } from "../Utils/journeyEvents.js";
+import { mongoClient } from "../Utils/messaging.js";
+import { computeServiceFee, toKobo } from "../Utils/serviceFee.js";
 
 const PROXIED_CATALOG_IMAGE_MODELS = new Set([
   "iPhone 17",
@@ -612,6 +616,10 @@ export const CreateEasyBoughtItem = async (req: Request, res: Response) => {
       });
     }
 
+    // The 8% service charge, fixed now and paid with the down payment (RESELLER-PLAN.md §8b).
+    const fee = computeServiceFee({ phonePrice: phonePriceNumber, loanedAmount });
+    const personId = String((getUser as any).personId || "") || null;
+
     const easyBoughtPayload: Record<string, any> = {
       provider: provider.slug,
       IphoneModel: resolvedIphoneModel,
@@ -623,6 +631,10 @@ export const CreateEasyBoughtItem = async (req: Request, res: Response) => {
       PhonePrice: phonePriceNumber,
       UserEmail: resolvedUserEmail,
       UserId:getUser._id,
+      serviceFeeKobo: fee.serviceFeeKobo,
+      serviceFeeBps: fee.serviceFeeBps,
+      serviceFeeBase: fee.serviceFeeBase,
+      ...(personId ? { personId } : {}),
     };
 
     if (resolvedPlan === "Monthly") {
@@ -631,7 +643,27 @@ export const CreateEasyBoughtItem = async (req: Request, res: Response) => {
       easyBoughtPayload.weeklyPlan = weeklyPlanNumber;
     }
 
-    const easyBoughtItem = await EasyBoughtItemModel.create(easyBoughtPayload);
+    // With events on, the item and its easybuy.item.created event commit together (AGENTS.md §3.1).
+    const easyBoughtItem = config.eventsEnabled
+      ? await inTransaction(mongoClient(), async (session) => {
+          const [item] = await EasyBoughtItemModel.create([easyBoughtPayload], { session: session as never });
+          if (!item) throw new Error("Failed to create EasyBoughtItem");
+          await publishItemCreated(session, traceIdOf(req), {
+            itemId: String(item._id),
+            requestId: null,
+            personId,
+            provider: provider.slug,
+            model: resolvedIphoneModel,
+            capacity: resolvedCapacity,
+            plan: resolvedPlan as "Weekly" | "Monthly",
+            phonePriceKobo: toKobo(phonePriceNumber),
+            downPaymentKobo: toKobo(normalizedDownPayment),
+            financedKobo: toKobo(loanedAmount),
+            fee,
+          });
+          return item;
+        })
+      : await EasyBoughtItemModel.create(easyBoughtPayload);
 
     return res.status(200).json({
       message: "EasyBoughtItem created successfully",

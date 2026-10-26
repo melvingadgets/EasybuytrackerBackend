@@ -27,6 +27,14 @@ const authJwksUrl = String(process.env.AUTH_JWKS_URL ?? (authIssuer ? `${authIss
 // Publish domain events to the outbox (Shortwork/AGENTS.md §3). Off by default so the rollout is
 // additive (§7.1); needs a replica set (Atlas is one). Turn on once the relay is running.
 const eventsEnabled = String(process.env.EVENTS_ENABLED ?? '').trim().toLowerCase() === 'true'
+// The EasyBuy service charge (RESELLER-PLAN.md §8b): 8% (800 basis points), paid with the down
+// payment and never refunded. The platform keeps half and a referring reseller earns half; with no
+// reseller the platform keeps all of it. The base defaults to the financed amount (phone price minus
+// down payment), an assumption logged in MOCK-DATA-REVIEW.md; EASYBUY_SERVICE_FEE_BASE=price charges
+// it on the full phone price instead.
+const serviceFeeBpsRaw = Number(String(process.env.EASYBUY_SERVICE_FEE_BPS ?? '800').trim())
+const serviceFeeBps = Number.isInteger(serviceFeeBpsRaw) && serviceFeeBpsRaw >= 0 && serviceFeeBpsRaw <= 10_000 ? serviceFeeBpsRaw : 800
+const serviceFeeBase = String(process.env.EASYBUY_SERVICE_FEE_BASE ?? '').trim().toLowerCase() === 'price' ? 'price' : 'financed'
 
 
 const missingVars: string[] = []
@@ -61,6 +69,10 @@ export const config = {
     jwksUrl: authJwksUrl,
   },
   eventsEnabled,
+  serviceFee: {
+    bps: serviceFeeBps,
+    base: serviceFeeBase as 'financed' | 'price',
+  },
   mail: {
     provider: mailProvider as 'smtp' | 'resend',
     mailFrom,

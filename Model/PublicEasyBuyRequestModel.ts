@@ -18,6 +18,7 @@ type PublicEasyBuyRequest = {
   capacity: string;
   plan: PublicEasyBuyRequestPlan;
   status: PublicEasyBuyRequestStatus;
+  personId?: string;
   anonymousId?: string;
   ipAddress?: string;
   userAgent?: string;
@@ -186,10 +187,21 @@ const PublicEasyBuyRequestSchema = new mongoose.Schema<PublicEasyBuyRequest>(
       ref: "easyboughtitem",
       index: true,
     },
+    // The applicant's platform person (auth user _id), set only from a verified Melvin user token,
+    // never from the request body (Shortwork/AGENTS.md §2.5). No default, so anonymous requests
+    // have no field at all and the partial index below skips them.
+    personId: {
+      type: String,
+      trim: true,
+    },
   },
   { timestamps: true }
 );
 
+PublicEasyBuyRequestSchema.index(
+  { personId: 1, createdAt: -1 },
+  { partialFilterExpression: { personId: { $type: "string" } } }
+);
 PublicEasyBuyRequestSchema.index({ email: 1, status: 1, createdAt: -1 });
 PublicEasyBuyRequestSchema.index({ status: 1, createdAt: -1 });
 

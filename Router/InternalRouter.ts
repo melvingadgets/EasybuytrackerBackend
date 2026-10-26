@@ -1,6 +1,6 @@
 import express, { type NextFunction, type Request, type Response } from "express";
 import { requireServiceToken, type Scope, type TokenVerifier } from "@melvingadgets/platform-kit";
-import { GetInternalCatalog, GetInternalQuote } from "../Controller/InternalController.js";
+import { GetInternalCatalog, GetInternalPersonJourney, GetInternalQuote } from "../Controller/InternalController.js";
 
 type Handler = (req: Request, res: Response, next: NextFunction) => void;
 
@@ -23,5 +23,6 @@ export const createInternalRouter = (verifier: TokenVerifier | null) => {
 
   router.get("/catalog", scope("easybuy:catalog.read"), wrap(GetInternalCatalog));
   router.get("/quote", scope("easybuy:quote.read"), wrap(GetInternalQuote));
+  router.get("/people/:personId/journey", scope("easybuy:journey.read"), wrap(GetInternalPersonJourney));
   return router;
 };

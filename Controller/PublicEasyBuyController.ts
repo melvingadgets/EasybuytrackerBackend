@@ -1,5 +1,7 @@
 import { type Request, type Response } from "express";
 import crypto from "crypto";
+import { inTransaction } from "@melvingadgets/platform-kit";
+import { config } from "../config/Config.js";
 import EasyBuyCapacityPriceModel from "../Model/EasyBuyCapacityPriceModel.js";
 import EasyBuyEventModel from "../Model/EasyBuyEventModel.js";
 import PublicEasyBuyDraftModel from "../Model/PublicEasyBuyDraftModel.js";
@@ -7,6 +9,9 @@ import PublicEasyBuyRequestModel from "../Model/PublicEasyBuyRequestModel.js";
 import { appendPricingProviderFilter, sortPricingDocsByProviderPrecedence } from "../Utils/providers/helpers.js";
 import { getAllProviderSlugs, getProvider, resolveProvider } from "../Utils/providers/registry.js";
 import type { FinanceProvider } from "../Utils/providers/types.js";
+import { publishRequestSubmitted, traceIdOf } from "../Utils/journeyEvents.js";
+import { mongoClient } from "../Utils/messaging.js";
+import { publicServiceFeeRule } from "../Utils/serviceFee.js";
 
 const MAX_SUBMITS_PER_WINDOW = 8;
 const SUBMIT_WINDOW_MS = 1000 * 60 * 15;
@@ -267,7 +272,8 @@ export const GetPublicEasyBuyCatalog = async (req: Request, res: Response) => {
 
     return res.status(200).json({
       message: "Public EasyBuy catalog retrieved successfully",
-      data: payload,
+      // serviceFee lets Apply show the service charge before anyone applies (RESELLER-PLAN.md §8b).
+      data: { ...payload, serviceFee: publicServiceFeeRule() },
     });
   } catch (_error: any) {
     console.error("[public-catalog] failed to retrieve public easybuy catalog");
@@ -501,8 +507,10 @@ export const CreatePublicEasyBuyRequest = async (req: Request, res: Response) =>
       .toString("hex")
       .toUpperCase()}`;
     const anonymousId = ensureAnonymousId(req, res);
+    // Only a verified Melvin user token links the request to a person (optionalPlatformPerson).
+    const personId = req.person?.personId;
 
-    const created = await PublicEasyBuyRequestModel.create({
+    const requestDoc = {
       requestId,
       provider: provider.slug,
       fullName,
@@ -511,8 +519,9 @@ export const CreatePublicEasyBuyRequest = async (req: Request, res: Response) =>
       iphoneModel,
       capacity,
       plan,
-      status: "verified",
+      status: "verified" as const,
       verifiedAt: new Date(),
+      ...(personId ? { personId } : {}),
       anonymousId,
       ipAddress,
       userAgent: normalizeString(req.headers["user-agent"]),
@@ -523,7 +532,18 @@ export const CreatePublicEasyBuyRequest = async (req: Request, res: Response) =>
       utmCampaign: normalizeString(req.body?.utmCampaign),
       utmTerm: normalizeString(req.body?.utmTerm),
       utmContent: normalizeString(req.body?.utmContent),
-    });
+    };
+
+    // The request and its easybuy.request.submitted event are written in one transaction
+    // (Shortwork/AGENTS.md §3.1) once events are on; before that, a plain insert as always.
+    const created = config.eventsEnabled
+      ? await inTransaction(mongoClient(), async (session) => {
+          const [doc] = await PublicEasyBuyRequestModel.create([requestDoc], { session: session as never });
+          if (!doc) throw new Error("request was not created");
+          await publishRequestSubmitted(session, traceIdOf(req), requestDoc);
+          return doc;
+        })
+      : await PublicEasyBuyRequestModel.create(requestDoc);
 
     try {
       await PublicEasyBuyDraftModel.deleteOne({ anonymousId });
@@ -547,6 +567,38 @@ export const CreatePublicEasyBuyRequest = async (req: Request, res: Response) =>
       message: "Failed to submit request",
       reason: error?.message || "Unknown error",
     });
+  }
+};
+
+// The signed-in person's own applications and where each one stands, for Apply's "My
+// applications" view. requireUserToken has already verified the person; nothing else is accepted.
+export const GetMyPublicEasyBuyRequests = async (req: Request, res: Response) => {
+  const personId = req.person?.personId;
+  if (!personId) {
+    return res.status(401).json({ message: "unauthorized" });
+  }
+  try {
+    const requests = await PublicEasyBuyRequestModel.find({ personId })
+      .sort({ createdAt: -1 })
+      .limit(50)
+      .select({
+        _id: 0,
+        requestId: 1,
+        provider: 1,
+        iphoneModel: 1,
+        capacity: 1,
+        plan: 1,
+        status: 1,
+        createdAt: 1,
+        approvedAt: 1,
+        rejectedAt: 1,
+        convertedAt: 1,
+      })
+      .lean();
+    res.setHeader("Cache-Control", "no-store");
+    return res.status(200).json({ message: "Your EasyBuy applications", data: requests });
+  } catch {
+    return res.status(400).json({ message: "Failed to load your applications" });
   }
 };
 
