@@ -1,6 +1,6 @@
 # EasyBuy backend — agent notes
 
-**Read first:** the platform rules in `C:\Users\HP\Desktop\Shortwork\AGENTS.md` (`../Shortwork/AGENTS.md` from here). They're canonical and override anything below.
+**Read first:** the platform rules in `C:\Users\HP\Desktop\Shortwork\AGENTS.md` (`../AGENTS.md` from here; this repo lives in the Shortwork workspace). They're canonical and override anything below.
 
 - **Role:** the `easybuy` service. It owns the finance catalog, selling prices, plans, applications, approved items, receipts and repayments (database `EasybuyTracker`). Other services get this data only through its API or its events.
 - **Request log:** `Middleware/requestLog.ts`, mounted first in `MainApp.ts`. Its fields are a cross-service contract (rules §6): keep it identical to the auth and store copies.
