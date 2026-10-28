@@ -2,7 +2,8 @@ import mongoose from "mongoose";
 
 // The documents attached to one Apply request (Utils/applicationDocuments.ts). Kept apart from the
 // request itself, which is listed in many places, so this sensitive data is only ever read by the
-// routes that need it. Files are private Cloudinary assets; the NIN is encrypted and `select: false`.
+// routes that need it. Files are private Cloudinary assets; the NIN is `select: false` so it is
+// only read by the route that shows it.
 
 const storedFileSchema = new mongoose.Schema(
   {
@@ -20,8 +21,9 @@ const storedFileSchema = new mongoose.Schema(
 const ApplicationDocumentsSchema = new mongoose.Schema(
   {
     requestId: { type: String, required: true, trim: true },
-    // AES-256-GCM ciphertext; only the SuperAdmin documents route decrypts it.
-    ninEncrypted: { type: String, select: false },
+    // The 11-digit NIN as the applicant typed it. Stored in plain text by the owner's decision on
+    // 2026-10-28 (no encryption, no key); only the SuperAdmin documents route selects it.
+    nin: { type: String, select: false },
     ninLast4: { type: String },
     ninUpdatedAt: { type: Date },
     bankStatements: { type: [storedFileSchema], default: [] },

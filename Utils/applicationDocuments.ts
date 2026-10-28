@@ -1,10 +1,12 @@
-import { createCipheriv, createDecipheriv, createHash, randomBytes, timingSafeEqual } from "crypto";
-import { config } from "../config/Config.js";
+import { createHash, randomBytes, timingSafeEqual } from "crypto";
 
 // The documents an Apply request needs before it can be approved: a three-month bank statement,
 // the applicant's NIN, and a photo of them holding their NIN. These are the most sensitive data
-// EasyBuy holds: nothing here is ever logged (Shortwork/AGENTS.md §6.3), the NIN is encrypted at
-// rest, and files are private (Utils/documentStorage.ts).
+// EasyBuy holds: nothing here is ever logged (Shortwork/AGENTS.md §6.3), the NIN is never returned
+// outside the SuperAdmin route, and files are private (Utils/documentStorage.ts).
+//
+// The NIN is stored as typed, not encrypted: the owner asked for the encryption and its key to be
+// removed on 2026-10-28. Anything that reads this collection later must not assume otherwise.
 
 /** Apply forwards uploads through Vercel functions, which cap a request at about 4.5 MB. */
 export const MAX_DOCUMENT_BYTES = 4 * 1024 * 1024;
@@ -49,35 +51,6 @@ export const normalizeNin = (value: unknown): string | null => {
   return /^\d{11}$/.test(digits) ? digits : null;
 };
 
-// ── NIN encryption: AES-256-GCM, stored as "v1:<iv>:<tag>:<ciphertext>" (base64 parts). ────────
-
-const documentsKey = (): Buffer | null => {
-  if (!config.documentsKey) return null;
-  const key = Buffer.from(config.documentsKey, "base64");
-  return key.length === 32 ? key : null;
-};
-
-export const documentsEncryptionReady = (): boolean => documentsKey() !== null;
-
-export const encryptText = (plain: string): string => {
-  const key = documentsKey();
-  if (!key) throw new Error("documents encryption key is not configured");
-  const iv = randomBytes(12);
-  const cipher = createCipheriv("aes-256-gcm", key, iv);
-  const ciphertext = Buffer.concat([cipher.update(plain, "utf8"), cipher.final()]);
-  return ["v1", iv.toString("base64"), cipher.getAuthTag().toString("base64"), ciphertext.toString("base64")].join(":");
-};
-
-export const decryptText = (stored: string): string => {
-  const key = documentsKey();
-  if (!key) throw new Error("documents encryption key is not configured");
-  const [version, iv, tag, ciphertext] = stored.split(":");
-  if (version !== "v1" || !iv || !tag || !ciphertext) throw new Error("unrecognised encrypted value");
-  const decipher = createDecipheriv("aes-256-gcm", key, Buffer.from(iv, "base64"));
-  decipher.setAuthTag(Buffer.from(tag, "base64"));
-  return Buffer.concat([decipher.update(Buffer.from(ciphertext, "base64")), decipher.final()]).toString("utf8");
-};
-
 // ── The anonymous applicant's upload key: returned once at submission, stored only as a hash. ──
 
 export const newDocumentsToken = (): string => randomBytes(32).toString("base64url");
@@ -93,12 +66,12 @@ export const documentsTokenMatches = (candidate: string, storedHash: string | nu
 
 /** What's still missing before the request can be approved. */
 export const missingDocuments = (
-  documents: { ninEncrypted?: string | null; ninLast4?: string | null; ninSelfie?: unknown; bankStatements?: unknown[] | null } | null | undefined,
+  documents: { nin?: string | null; ninLast4?: string | null; ninSelfie?: unknown; bankStatements?: unknown[] | null } | null | undefined,
 ): RequiredDocument[] => {
   const missing: RequiredDocument[] = [];
   if (!documents?.bankStatements?.length) missing.push("bank_statement");
-  // ninLast4 is written with the ciphertext, so callers needn't read the encrypted NIN.
-  if (!documents?.ninEncrypted && !documents?.ninLast4) missing.push("nin");
+  // ninLast4 is written with the NIN, so a summary that excludes the number still knows it's set.
+  if (!documents?.nin && !documents?.ninLast4) missing.push("nin");
   if (!documents?.ninSelfie) missing.push("nin_selfie");
   return missing;
 };

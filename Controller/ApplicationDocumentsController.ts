@@ -8,10 +8,7 @@ import {
   DOCUMENTS_EDITABLE_STATUSES,
   MAX_BANK_STATEMENT_FILES,
   MAX_DOCUMENT_BYTES,
-  decryptText,
-  documentsEncryptionReady,
   documentsTokenMatches,
-  encryptText,
   isAllowedFile,
   missingDocuments,
   normalizeNin,
@@ -81,7 +78,7 @@ const summaryFor = (request: LeanRequest, documents: Record<string, any> | null)
 
 const loadDocuments = (requestId: string, withNin = false) =>
   withNin
-    ? ApplicationDocumentsModel.findOne({ requestId }).select("+ninEncrypted").lean()
+    ? ApplicationDocumentsModel.findOne({ requestId }).select("+nin").lean()
     : ApplicationDocumentsModel.findOne({ requestId }).lean();
 
 // Reads, checks and stores an uploaded file. Returns the stored file, or sends the error.
@@ -138,12 +135,9 @@ export const SaveApplicationNin = async (req: Request, res: Response) => {
   if (!isEditable(owned.request.status)) return lockedResponse(res);
   const nin = normalizeNin(req.body?.nin);
   if (!nin) return res.status(400).json({ code: "invalid_nin", message: "Enter your 11-digit NIN." });
-  if (!documentsEncryptionReady()) {
-    return res.status(503).json({ code: "documents_unavailable", message: "We can't take your NIN right now. Please try again later." });
-  }
   const documents = await ApplicationDocumentsModel.findOneAndUpdate(
     { requestId: owned.request.requestId },
-    { $set: { ninEncrypted: encryptText(nin), ninLast4: nin.slice(-4), ninUpdatedAt: new Date() } },
+    { $set: { nin, ninLast4: nin.slice(-4), ninUpdatedAt: new Date() } },
     { upsert: true, returnDocument: "after" }
   ).lean();
   return res.status(200).json({ data: summaryFor(owned.request, documents) });
@@ -225,14 +219,7 @@ export const SuperAdminGetApplicationDocuments = async (req: Request, res: Respo
   if (!request) return res.status(404).json({ message: "Public request not found" });
   const documents = await loadDocuments(requestId, true);
 
-  let nin: string | null = null;
-  if (documents?.ninEncrypted) {
-    try {
-      nin = decryptText(documents.ninEncrypted);
-    } catch {
-      nin = null;
-    }
-  }
+  const nin = (documents?.nin as string | undefined) ?? null;
 
   // Viewing someone's ID documents is recorded (who, which request, when).
   await AuditLogModel.create({
@@ -250,7 +237,6 @@ export const SuperAdminGetApplicationDocuments = async (req: Request, res: Respo
     data: {
       ...summaryFor(request as unknown as LeanRequest, documents),
       nin: nin ? { provided: true, value: nin } : { provided: false },
-      ninUnreadable: Boolean(documents?.ninEncrypted && !nin),
       bankStatements: (documents?.bankStatements ?? []).map(withLink),
       ninSelfie: documents?.ninSelfie ? withLink(documents.ninSelfie) : null,
       linkExpiresInSeconds: 300,

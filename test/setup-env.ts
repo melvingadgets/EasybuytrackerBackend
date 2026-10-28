@@ -14,6 +14,4 @@ process.env.GMAIL_APP_PASSWORD = "unused";
 process.env.CLOUDINARY_CLOUD_NAME = "test";
 process.env.CLOUDINARY_API_KEY = "test";
 process.env.CLOUDINARY_API_SECRET = "test";
-// A fixed 32-byte key for the NIN encryption tests.
-process.env.EASYBUY_DOCUMENTS_KEY = Buffer.alloc(32, 7).toString("base64");
 delete process.env.AUTH_ISSUER;

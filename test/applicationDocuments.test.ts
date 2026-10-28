@@ -126,13 +126,12 @@ describe("pure rules", () => {
     expect(lib.isAllowedFile("nin_selfie", lib.sniffFile(PDF))).toBe(false);
   });
 
-  it("encrypts the NIN so the stored value never contains it", async () => {
+  it("takes an 11-digit NIN and nothing else", async () => {
     const lib = await import("../Utils/applicationDocuments.js");
-    const sealed = lib.encryptText("12345678901");
-    expect(sealed).not.toContain("12345678901");
-    expect(sealed.startsWith("v1:")).toBe(true);
-    expect(lib.decryptText(sealed)).toBe("12345678901");
-    expect(lib.encryptText("12345678901")).not.toBe(sealed); // a fresh IV every time
+    expect(lib.normalizeNin("12345678901")).toBe("12345678901");
+    expect(lib.normalizeNin("1234-5678-901")).toBeNull();
+    expect(lib.normalizeNin("")).toBeNull();
+    expect(lib.normalizeNin(null)).toBeNull();
   });
 });
 
@@ -169,16 +168,16 @@ describe("who can add documents", () => {
 });
 
 describe("the documents", () => {
-  it("stores the NIN encrypted and shows the applicant only its last four digits", async () => {
+  it("stores the NIN and shows the applicant only its last four digits", async () => {
     const { requestId, key } = await submitAnonymously();
     expect((await request(app).put(docsPath(requestId, "/nin")).set("x-documents-token", key).send({ nin: "12345" })).status).toBe(400);
     const res = await request(app).put(docsPath(requestId, "/nin")).set("x-documents-token", key).send({ nin: "12345678901" });
     expect(res.status).toBe(200);
     expect(res.body.data.nin).toEqual({ provided: true, last4: "8901" });
     expect(JSON.stringify(res.body)).not.toContain("12345678901");
-    const raw = await DocumentsModel.findOne({ requestId }).select("+ninEncrypted").lean();
-    expect(raw?.ninEncrypted).toBeTruthy();
-    expect(raw?.ninEncrypted).not.toContain("12345678901");
+    // Stored as typed, by the owner's decision of 2026-10-28: no encryption, no key.
+    const raw = await DocumentsModel.findOne({ requestId }).select("+nin").lean();
+    expect(raw?.nin).toBe("12345678901");
   });
 
   it("needs the down-payment confirmation, real document bytes, and at most three statement files", async () => {
