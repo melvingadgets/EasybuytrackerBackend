@@ -64,6 +64,10 @@ const summaryFor = (request: LeanRequest, documents: Record<string, any> | null)
   const missing = missingDocuments(documents);
   return {
     requestId: request.requestId,
+    // The applicant's own view of where the application stands. Added with the merged Apply app
+    // (2026-10-28): the documents route is the one endpoint an upload-key holder can always reach,
+    // so without this the browser could never tell "under review" from "approved".
+    status: request.status,
     required: Boolean(request.documentsRequired),
     editable: isEditable(request.status),
     complete: missing.length === 0,
@@ -207,6 +211,58 @@ export const UploadNinSelfie = async (req: Request, res: Response) => {
   await removeQuietly(before?.ninSelfie as StoredFile | null | undefined);
   const documents = await loadDocuments(owned.request.requestId);
   return res.status(201).json({ data: summaryFor(owned.request, documents) });
+};
+
+/**
+ * Binds an application that was submitted anonymously to the signed-in person, so it shows up in
+ * `GET /easybuy-requests/mine` and the merged Apply app can gate on it. `personId` is only ever
+ * written at submission from a verified token (PublicEasyBuyController), so without this an
+ * applicant who submitted before signing in is invisible to their own account.
+ *
+ * The caller must hold the request's upload key AND present a verified Melvin token: the key proves
+ * they made the application, the token supplies the identity. Both come from credentials the
+ * applicant already has, and identity itself is never read from the body (AGENTS.md §2.5).
+ */
+export const ClaimApplication = async (req: Request, res: Response) => {
+  const personId = req.person?.personId;
+  if (!personId) return res.status(401).json({ message: "Sign in to add this application to your account." });
+
+  const requestId = requestIdOf(req);
+  if (!requestId) return res.status(404).json({ message: "Application not found" });
+  const request = await PublicEasyBuyRequestModel.findOne({ requestId })
+    .select("+documentsTokenHash +documentsTokenExpiresAt")
+    .lean();
+  if (!request) return res.status(404).json({ message: "Application not found" });
+
+  const tokenValid = Boolean(request.documentsTokenExpiresAt && new Date(request.documentsTokenExpiresAt) > new Date());
+  if (!tokenValid || !documentsTokenMatches(String(req.get(TOKEN_HEADER) ?? ""), request.documentsTokenHash)) {
+    return res.status(404).json({ message: "Application not found" });
+  }
+
+  // One atomic write. The filter only matches an unclaimed request or one already owned by this
+  // person, so a second person's claim cannot take it over and a repeat claim by the same person
+  // is a no-op (AGENTS.md §3.8: the rule is the filter, not a read-then-write).
+  const claimed = await PublicEasyBuyRequestModel.findOneAndUpdate(
+    {
+      requestId,
+      $or: [{ personId: { $exists: false } }, { personId: null }, { personId }],
+    },
+    { $set: { personId } },
+    { returnDocument: "after" }
+  )
+    .select("requestId status personId documentsRequired")
+    .lean();
+
+  if (!claimed) {
+    return res.status(409).json({
+      code: "already_claimed",
+      message: "This application is already linked to another account.",
+    });
+  }
+
+  const documents = await loadDocuments(requestId);
+  res.set("Cache-Control", "no-store");
+  return res.status(200).json({ data: summaryFor(claimed as unknown as LeanRequest, documents) });
 };
 
 // ── SuperAdmin (/api/v1/superadmin/public-easybuy-requests/:requestId/documents) ─────────────

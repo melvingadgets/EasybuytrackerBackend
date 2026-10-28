@@ -2,7 +2,7 @@ import express from "express";
 import mongoose from "mongoose";
 import request from "supertest";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { createTokenSigner, createTokenVerifier, generateSigningKey } from "@melvingadgets/platform-kit";
+import { createTokenSigner, createTokenVerifier, generateSigningKey, requireUserToken } from "@melvingadgets/platform-kit";
 
 // Application documents: a three-month bank statement, the NIN, and a photo holding the NIN.
 // Added after submitting, by the signed-in owner or the holder of the request's upload key; all
@@ -61,6 +61,13 @@ beforeAll(async () => {
   app = express();
   app.use(express.json());
   app.use("/api/v1/public", createPublicRouter(verifier));
+  // The real "mine" controller behind the real RS256 guard (verifier already built above), so a
+  // claim's effect on the gate is asserted through the endpoint and token type production uses.
+  app.get(
+    "/mine",
+    requireUserToken(verifier) as unknown as express.RequestHandler,
+    (await import("../Controller/PublicEasyBuyController.js")).GetMyPublicEasyBuyRequests
+  );
   app.post("/admin/:requestId/approve", asSuperAdmin, admin.SuperAdminApprovePublicEasyBuyRequest);
   app.post("/admin/:requestId/reject", asSuperAdmin, admin.SuperAdminRejectPublicEasyBuyRequest);
   app.get("/admin/requests", asSuperAdmin, admin.SuperAdminListPublicEasyBuyRequests);
@@ -247,6 +254,71 @@ describe("approval needs all three documents", () => {
     expect(row.documents).toMatchObject({ required: true, count: 1, complete: false });
     expect(JSON.stringify(list.body)).not.toContain("12345678901");
     expect(JSON.stringify(list.body)).not.toContain("documentsTokenHash");
+  });
+});
+
+// Submitted before signing in, then linked to the account: without this the application never shows
+// up in /mine and the merged Apply app can never gate on it.
+describe("claiming an anonymous application", () => {
+  const claim = (requestId: string, key: string, token: string) =>
+    request(app).post(docsPath(requestId, "/claim")).set("x-documents-token", key).set("authorization", token);
+
+  const mine = (token: string) => request(app).get("/mine").set("authorization", token);
+
+  it("links it to the signed-in person, and it then appears in their applications", async () => {
+    const { requestId, key } = await submitAnonymously();
+    const token = await userToken("person-claimant");
+    expect((await mine(token)).body.data).toHaveLength(0);
+
+    const res = await claim(requestId, key, token);
+    expect(res.status).toBe(200);
+    expect(res.body.data).toMatchObject({ requestId, status: "verified" });
+
+    const listed = (await mine(token)).body.data;
+    expect(listed.map((row: { requestId: string }) => row.requestId)).toContain(requestId);
+  });
+
+  it("is idempotent for the same person", async () => {
+    const { requestId, key } = await submitAnonymously();
+    const token = await userToken("person-repeat");
+    expect((await claim(requestId, key, token)).status).toBe(200);
+    expect((await claim(requestId, key, token)).status).toBe(200);
+    expect(await RequestModel.countDocuments({ requestId, personId: "person-repeat" })).toBe(1);
+  });
+
+  it("cannot be taken over by someone else", async () => {
+    const { requestId, key } = await submitAnonymously();
+    expect((await claim(requestId, key, await userToken("person-first"))).status).toBe(200);
+    const stolen = await claim(requestId, key, await userToken("person-second"));
+    expect(stolen.status).toBe(409);
+    expect(stolen.body.code).toBe("already_claimed");
+    const saved = await RequestModel.findOne({ requestId }).lean();
+    expect(saved?.personId).toBe("person-first");
+  });
+
+  it("needs the upload key as well as a token: the key proves who made it", async () => {
+    const { requestId, key } = await submitAnonymously();
+    const token = await userToken("person-nokey");
+    expect((await request(app).post(docsPath(requestId, "/claim")).set("authorization", token)).status).toBe(404);
+    expect((await request(app).post(docsPath(requestId, "/claim")).set("x-documents-token", key)).status).toBe(401);
+    expect((await claim(requestId, "wrong-key", token)).status).toBe(404);
+    const saved = await RequestModel.findOne({ requestId }).lean();
+    expect(saved?.personId).toBeUndefined();
+  });
+
+  it("refuses an expired key", async () => {
+    const { requestId, key } = await submitAnonymously();
+    await RequestModel.updateOne({ requestId }, { $set: { documentsTokenExpiresAt: new Date(Date.now() - 1000) } });
+    expect((await claim(requestId, key, await userToken("person-late"))).status).toBe(404);
+  });
+
+  it("reports the application's status to the applicant, but never the full NIN", async () => {
+    const { requestId, key } = await submitAnonymously();
+    await request(app).put(docsPath(requestId, "/nin")).set("x-documents-token", key).send({ nin: "12345678901" });
+    const res = await request(app).get(docsPath(requestId)).set("x-documents-token", key);
+    expect(res.status).toBe(200);
+    expect(res.body.data.status).toBe("verified");
+    expect(JSON.stringify(res.body)).not.toContain("12345678901");
   });
 });
 

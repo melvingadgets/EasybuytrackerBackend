@@ -11,6 +11,7 @@ import {
   VerifyPublicEasyBuyRequest,
 } from "../Controller/PublicEasyBuyController.js";
 import {
+  ClaimApplication,
   DeleteBankStatement,
   GetApplicationDocuments,
   SaveApplicationNin,
@@ -68,6 +69,9 @@ export const createPublicRouter = (verifier: TokenVerifier | null) => {
   router.post("/easybuy-requests/:requestId/documents/bank-statement", owner, documentUpload, safe(UploadBankStatement));
   router.delete("/easybuy-requests/:requestId/documents/bank-statement/:fileId", owner, safe(DeleteBankStatement));
   router.post("/easybuy-requests/:requestId/documents/nin-selfie", owner, documentUpload, safe(UploadNinSelfie));
+  // Links an anonymously submitted application to the signed-in person: the upload key proves they
+  // made it, the token supplies the identity (both required, identity never from the body).
+  router.post("/easybuy-requests/:requestId/documents/claim", signedIn, safe(ClaimApplication));
   router.post("/events", TrackPublicEvent);
   return router;
 };
