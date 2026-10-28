@@ -8,7 +8,10 @@ export type AuthServiceUser = {
   _id: string;
   email: string;
   fullName: string;
-  role: AuthServiceRole;
+  // Auth's canonical platform roles are `User | Admin | SuperAdmin` (rules §4.4) — this is a
+  // response, not a request, so it is not `AuthServiceRole`. It accepts the lowercase spelling too
+  // because older deployments answered that way; `toLegacyRole` normalises either to `LegacyRole`.
+  role: LegacyRole | AuthServiceRole;
   emailVerified?: boolean;
   disabled?: boolean;
   originApp?: string;
@@ -38,22 +41,24 @@ type AuthServiceResponse<T> = {
   user?: AuthServiceUser;
 };
 
-const LEGACY_ROLE_MAP: Record<AuthServiceRole, LegacyRole> = {
-  user: "User",
-  admin: "Admin",
-  superadmin: "SuperAdmin",
-};
-
 const AUTH_ROLE_MAP: Record<LegacyRole, AuthServiceRole> = {
   User: "user",
   Admin: "admin",
   SuperAdmin: "superadmin",
 };
 
+// Auth stores and returns the platform roles (`User | Admin | SuperAdmin`, rules §4.4), but this
+// service's older callers and the `AuthServiceRole` type name them in lowercase. Accept both rather
+// than trusting one casing: guessing wrong here silently demotes every platform admin to `User`.
 export const toLegacyRole = (role: string | undefined | null): LegacyRole => {
-  if (role === "admin") return "Admin";
-  if (role === "superadmin") return "SuperAdmin";
-  return "User";
+  switch (String(role ?? "").trim().toLowerCase()) {
+    case "admin":
+      return "Admin";
+    case "superadmin":
+      return "SuperAdmin";
+    default:
+      return "User";
+  }
 };
 
 export const toAuthRole = (role: string | undefined | null): AuthServiceRole => {
@@ -158,7 +163,7 @@ export const syncLocalShadowUser = async (
   const update: Record<string, unknown> = {
     fullName: authUser.fullName,
     email: authUser.email.toLowerCase(),
-    role: LEGACY_ROLE_MAP[authUser.role] || "User",
+    role: toLegacyRole(authUser.role),
   };
 
   if (extra && Object.prototype.hasOwnProperty.call(extra, "createdByAdmin")) {
