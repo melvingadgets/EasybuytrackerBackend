@@ -20,6 +20,7 @@ import {
   SuperAdminUpdateUserNextDueDate,
   SuperAdminGetUsersWithEasyBoughtItems,
 } from "../Controller/SuperAdminController.js";
+import { SuperAdminGetApplicationDocuments } from "../Controller/ApplicationDocumentsController.js";
 
 const router = express.Router();
 
@@ -56,6 +57,14 @@ router.get(
   verifyToken,
   requireRole(["SuperAdmin"]),
   SuperAdminListPublicEasyBuyRequests
+);
+router.get(
+  "/public-easybuy-requests/:requestId/documents",
+  verifyToken,
+  requireRole(["SuperAdmin"]),
+  (req, res, next) => {
+    SuperAdminGetApplicationDocuments(req, res).catch(next);
+  }
 );
 router.patch(
   "/public-easybuy-requests/:requestId/approve",

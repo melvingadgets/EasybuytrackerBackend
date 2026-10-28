@@ -10,7 +10,8 @@ type AuditAction =
   | "PUBLIC_REQUEST_CONVERT"
   | "RECEIPT_UPLOAD_DATE_UPDATE"
   | "USER_NEXT_DUE_DATE_UPDATE"
-  | "ITEM_CREATED_DATE_UPDATE";
+  | "ITEM_CREATED_DATE_UPDATE"
+  | "PUBLIC_REQUEST_DOCUMENTS_VIEW";
 type AuditTargetType = "user" | "receipt" | "easyboughtitem" | "publicrequest";
 
 interface AuditLog {
@@ -51,6 +52,7 @@ const AuditLogSchema = new mongoose.Schema(
         "RECEIPT_UPLOAD_DATE_UPDATE",
         "USER_NEXT_DUE_DATE_UPDATE",
         "ITEM_CREATED_DATE_UPDATE",
+        "PUBLIC_REQUEST_DOCUMENTS_VIEW",
       ],
       required: true,
       index: true,

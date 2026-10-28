@@ -19,6 +19,9 @@ type PublicEasyBuyRequest = {
   plan: PublicEasyBuyRequestPlan;
   status: PublicEasyBuyRequestStatus;
   personId?: string;
+  documentsRequired?: boolean;
+  documentsTokenHash?: string;
+  documentsTokenExpiresAt?: Date;
   anonymousId?: string;
   ipAddress?: string;
   userAgent?: string;
@@ -193,6 +196,20 @@ const PublicEasyBuyRequestSchema = new mongoose.Schema<PublicEasyBuyRequest>(
     personId: {
       type: String,
       trim: true,
+    },
+    // Requests created since application documents shipped need them before approval; older
+    // requests have no field and keep approving as before (Shortwork/AGENTS.md §7.1).
+    documentsRequired: {
+      type: Boolean,
+    },
+    // The anonymous applicant's upload key, as a SHA-256 hash; never selected by default.
+    documentsTokenHash: {
+      type: String,
+      select: false,
+    },
+    documentsTokenExpiresAt: {
+      type: Date,
+      select: false,
     },
   },
   { timestamps: true }

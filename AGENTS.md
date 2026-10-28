@@ -17,5 +17,10 @@
   - **New routes:** `GET /api/v1/public/easybuy-requests/mine` (signed in) and `GET /api/v1/internal/people/:personId/journey` (scope `easybuy:journey.read`, for the reseller service).
   - **Migration:** `migrate-reseller-fields.ts` (indexes + before/after counts).
   - **Swift Device multiplier bug:** the dashboard applies AuraPay's markups to Swift Device loans (`DashboardController.ts:98–110`). It is known and **deliberately not fixed** (the user said not to).
+- **Application documents (2026-10-27):** after submitting, an Apply applicant adds their last 3 months' bank statement, their NIN and a photo holding their NIN (`Controller/ApplicationDocumentsController.ts`, `Utils/applicationDocuments.ts`).
+  - Stored apart from the request in `applicationdocuments`. The NIN is AES-256-GCM encrypted with `EASYBUY_DOCUMENTS_KEY` (saving fails closed with 503 without it); files are **private** Cloudinary assets (`type: "authenticated"`, `Utils/documentStorage.ts`), readable only through 5-minute signed links from the SuperAdmin route, and each view is audited (`PUBLIC_REQUEST_DOCUMENTS_VIEW`). Never log a NIN, a file or a link; never expose them to resellers or in the journey route.
+  - Who may upload: the signed-in owner (verified Melvin token) or the holder of the request's upload key (returned once at submission as `documentsToken`, stored as a hash, 30 days). Anyone else gets 404.
+  - Files are identified by their bytes (PDF/JPEG/PNG/WebP), 4 MB max (Apply proxies through Vercel, ~4.5 MB per request), at most 3 statement files, and a statement needs the down-payment confirmation.
+  - Requests created since then carry `documentsRequired: true` and can't be approved until all three are in (409 `documents_incomplete`); older requests approve as before. Approval or rejection locks the documents.
 - **Tests:** `npm test` (vitest) needs a replica set (`MONGO_RS_HOST`, default `127.0.0.1:27028`) for the outbox transaction tests; it drops its throwaway database afterwards.
 - **Known risks to fix, not copy:** money stored as floats (rules §4); the check-then-create for "one active item per person" in `CreateEasyBoughtItem` (rules §3.8).

@@ -12,6 +12,7 @@ import type { FinanceProvider } from "../Utils/providers/types.js";
 import { publishRequestSubmitted, traceIdOf } from "../Utils/journeyEvents.js";
 import { mongoClient } from "../Utils/messaging.js";
 import { publicServiceFeeRule } from "../Utils/serviceFee.js";
+import { DOCUMENTS_TOKEN_TTL_MS, hashDocumentsToken, newDocumentsToken } from "../Utils/applicationDocuments.js";
 
 const MAX_SUBMITS_PER_WINDOW = 8;
 const SUBMIT_WINDOW_MS = 1000 * 60 * 15;
@@ -509,6 +510,9 @@ export const CreatePublicEasyBuyRequest = async (req: Request, res: Response) =>
     const anonymousId = ensureAnonymousId(req, res);
     // Only a verified Melvin user token links the request to a person (optionalPlatformPerson).
     const personId = req.person?.personId;
+    // The applicant adds their documents after submitting; this key (returned once, stored as a
+    // hash) lets them do it without signing in.
+    const documentsToken = newDocumentsToken();
 
     const requestDoc = {
       requestId,
@@ -522,6 +526,9 @@ export const CreatePublicEasyBuyRequest = async (req: Request, res: Response) =>
       status: "verified" as const,
       verifiedAt: new Date(),
       ...(personId ? { personId } : {}),
+      documentsRequired: true,
+      documentsTokenHash: hashDocumentsToken(documentsToken),
+      documentsTokenExpiresAt: new Date(Date.now() + DOCUMENTS_TOKEN_TTL_MS),
       anonymousId,
       ipAddress,
       userAgent: normalizeString(req.headers["user-agent"]),
@@ -560,6 +567,8 @@ export const CreatePublicEasyBuyRequest = async (req: Request, res: Response) =>
         requestId: created.requestId,
         status: created.status,
         provider: provider.slug,
+        // Shown once; send it as X-Documents-Token to add documents.
+        documentsToken,
       },
     });
   } catch (error: any) {

@@ -88,5 +88,8 @@ export const config = {
     cloudName: cloudinaryCloudName,
     apiKey: cloudinaryApiKey,
     apiSecret: cloudinaryApiSecret
-  }
+  },
+  // Encrypts applicants' NINs (AES-256-GCM): base64 of 32 random bytes. Optional at boot; saving a
+  // NIN fails closed (503) until it's set. Never logged.
+  documentsKey: String(process.env.EASYBUY_DOCUMENTS_KEY ?? '').trim()
 }

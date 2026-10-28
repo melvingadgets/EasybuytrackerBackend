@@ -93,6 +93,13 @@ const apply = (token?: string, extra: Record<string, unknown> = {}) => {
   return token ? call.set("authorization", token) : call;
 };
 
+// New requests need their three documents before they can be approved (ApplicationDocumentsController).
+const withDocuments = async (requestId: string) => {
+  const Documents = (await import("../Model/ApplicationDocumentsModel.js")).default;
+  const file = { fileId: `f-${requestId}`, publicId: `p-${requestId}`, resourceType: "image", format: "jpg", mime: "image/jpeg", bytes: 1, uploadedAt: new Date() };
+  await Documents.create({ requestId, ninLast4: "1234", bankStatements: [file], ninSelfie: file });
+};
+
 describe("service fee maths", () => {
   it("is 8% of the financed amount, in kobo, half-up", async () => {
     const { computeServiceFee } = await import("../Utils/serviceFee.js");
@@ -152,6 +159,7 @@ describe("review → events", () => {
   it("writes approved and rejected events with the status change", async () => {
     const first = await apply(await userToken("person-b"));
     const second = await apply(await userToken("person-b"), { capacity: "256GB" });
+    await withDocuments(first.body.data.requestId);
     expect((await request(app).post(`/admin/${first.body.data.requestId}/approve`).send({})).status).toBe(200);
     expect((await request(app).post(`/admin/${second.body.data.requestId}/reject`).send({ reason: "incomplete" })).status).toBe(200);
 
@@ -173,6 +181,7 @@ describe("convert → 8% service fee and easybuy.item.created", () => {
     const requestId = applied.body.data.requestId;
     const email = (await RequestModel.findOne({ requestId }).lean())!.email;
     await UserModel.create({ fullName: "Ada Obi", email, role: "User" });
+    await withDocuments(requestId);
     await request(app).post(`/admin/${requestId}/approve`).send({});
 
     const res = await request(app).post(`/admin/${requestId}/convert`).send({ phonePrice: 1_200_000, monthlyPlan: 3 });

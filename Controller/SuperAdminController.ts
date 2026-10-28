@@ -20,6 +20,7 @@ import { inTransaction, publishInTransaction, easybuyPriceUpdated, nairaToKobo }
 import { mongoClient, rawDb } from "../Utils/messaging.js";
 import { config } from "../config/Config.js";
 import { publishItemCreated, publishRequestReviewed, traceIdOf } from "../Utils/journeyEvents.js";
+import { documentsSummaryByRequest, missingForApproval } from "./ApplicationDocumentsController.js";
 import { computeServiceFee, toKobo } from "../Utils/serviceFee.js";
 
 const normalizeReason = (value: unknown) => {
@@ -962,9 +963,16 @@ export const SuperAdminListPublicEasyBuyRequests = async (req: Request, res: Res
       PublicEasyBuyRequestModel.countDocuments(filter),
     ]);
 
+    // Documents status for the review list: counts only, never a NIN or a file link.
+    const documentsByRequest = await documentsSummaryByRequest(items.map((item) => item.requestId));
+    const withDocuments = items.map((item) => ({
+      ...item,
+      documents: { required: Boolean(item.documentsRequired), ...documentsByRequest.get(item.requestId) },
+    }));
+
     return res.status(200).json({
       message: "Public EasyBuy requests retrieved successfully",
-      data: items,
+      data: withDocuments,
       pagination: {
         page,
         limit,
@@ -1069,6 +1077,16 @@ export const SuperAdminApprovePublicEasyBuyRequest = async (req: Request, res: R
   const reason = normalizeReason(req.body?.reason);
 
   try {
+    // A request that needs documents can't be approved until all three are in.
+    const missing = await missingForApproval(requestId);
+    if (missing.length) {
+      return res.status(409).json({
+        code: "documents_incomplete",
+        message: "This application is missing documents, so it can't be approved yet.",
+        missing,
+      });
+    }
+
     const approve = (session?: unknown) =>
       PublicEasyBuyRequestModel.findOneAndUpdate(
         { requestId, status: { $in: ["verified", "pending_verification"] } },
