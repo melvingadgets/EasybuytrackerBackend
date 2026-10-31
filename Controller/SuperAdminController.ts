@@ -20,6 +20,8 @@ import { inTransaction, publishInTransaction, easybuyPriceUpdated, nairaToKobo }
 import { mongoClient, rawDb } from "../Utils/messaging.js";
 import { config } from "../config/Config.js";
 import { publishItemCreated, publishRequestReviewed, traceIdOf } from "../Utils/journeyEvents.js";
+import { can } from "@melvingadgets/platform-kit";
+import { auditActorRole } from "../Utils/auditActor.js";
 import { documentsSummaryByRequest, missingForApproval } from "./ApplicationDocumentsController.js";
 import { computeServiceFee, toKobo } from "../Utils/serviceFee.js";
 
@@ -198,13 +200,13 @@ export const SuperAdminGetUsersWithEasyBoughtItems = async (req: Request, res: R
 
 export const SuperAdminDeleteUserOrAdmin = async (req: Request, res: Response) => {
   const actorId = req.user?._id;
-  const actorRole = req.user?.role;
+  const actorRole = auditActorRole(req);
   const { userId } = req.params;
 
-  if (!actorId || actorRole !== "SuperAdmin") {
-    return res.status(401).json({
-      message: "Access denied",
-    });
+  if (!actorId || !can(req.user, "easybuy.superadmin.access")) {
+    // Authenticated without the permission is a 403, not a 401: re-sending the same
+    // token cannot help, and 401 is what sends a client into a re-login loop.
+    return res.status(403).json({ message: "Access denied" });
   }
 
   if (!userId || !mongoose.isValidObjectId(userId)) {
@@ -350,11 +352,13 @@ export const SuperAdminPreviewReceiptUploadedDate = async (req: Request, res: Re
 
 export const SuperAdminUpdateReceiptUploadedDate = async (req: Request, res: Response) => {
   const actorId = req.user?._id;
-  const actorRole = req.user?.role;
+  const actorRole = auditActorRole(req);
   const { receiptId } = req.params;
 
-  if (!actorId || actorRole !== "SuperAdmin") {
-    return res.status(401).json({ message: "Access denied" });
+  if (!actorId || !can(req.user, "easybuy.superadmin.access")) {
+    // Authenticated without the permission is a 403, not a 401: re-sending the same
+    // token cannot help, and 401 is what sends a client into a re-login loop.
+    return res.status(403).json({ message: "Access denied" });
   }
 
   if (!receiptId || !mongoose.isValidObjectId(receiptId)) {
@@ -475,11 +479,13 @@ export const SuperAdminPreviewUserNextDueDate = async (req: Request, res: Respon
 
 export const SuperAdminUpdateUserNextDueDate = async (req: Request, res: Response) => {
   const actorId = req.user?._id;
-  const actorRole = req.user?.role;
+  const actorRole = auditActorRole(req);
   const { userId } = req.params;
 
-  if (!actorId || actorRole !== "SuperAdmin") {
-    return res.status(401).json({ message: "Access denied" });
+  if (!actorId || !can(req.user, "easybuy.superadmin.access")) {
+    // Authenticated without the permission is a 403, not a 401: re-sending the same
+    // token cannot help, and 401 is what sends a client into a re-login loop.
+    return res.status(403).json({ message: "Access denied" });
   }
 
   if (!userId || !mongoose.isValidObjectId(userId)) {
@@ -596,11 +602,13 @@ export const SuperAdminPreviewItemCreatedDate = async (req: Request, res: Respon
 
 export const SuperAdminUpdateItemCreatedDate = async (req: Request, res: Response) => {
   const actorId = req.user?._id;
-  const actorRole = req.user?.role;
+  const actorRole = auditActorRole(req);
   const { itemId } = req.params;
 
-  if (!actorId || actorRole !== "SuperAdmin") {
-    return res.status(401).json({ message: "Access denied" });
+  if (!actorId || !can(req.user, "easybuy.superadmin.access")) {
+    // Authenticated without the permission is a 403, not a 401: re-sending the same
+    // token cannot help, and 401 is what sends a client into a re-login loop.
+    return res.status(403).json({ message: "Access denied" });
   }
 
   if (!itemId || !mongoose.isValidObjectId(itemId)) {
@@ -696,10 +704,12 @@ export const SuperAdminGetEasyBuyPricing = async (req: Request, res: Response) =
 
 export const SuperAdminUpdateEasyBuyPricing = async (req: Request, res: Response) => {
   const actorId = req.user?._id;
-  const actorRole = req.user?.role;
+  const actorRole = auditActorRole(req);
 
-  if (!actorId || actorRole !== "SuperAdmin") {
-    return res.status(401).json({ message: "Access denied" });
+  if (!actorId || !can(req.user, "easybuy.superadmin.access")) {
+    // Authenticated without the permission is a 403, not a 401: re-sending the same
+    // token cannot help, and 401 is what sends a client into a re-login loop.
+    return res.status(403).json({ message: "Access denied" });
   }
 
   const updates = Array.isArray(req.body?.updates) ? req.body.updates : [];
@@ -1064,9 +1074,11 @@ export const SuperAdminListAbandonedPublicEasyBuyDrafts = async (req: Request, r
 
 export const SuperAdminApprovePublicEasyBuyRequest = async (req: Request, res: Response) => {
   const actorId = req.user?._id;
-  const actorRole = req.user?.role;
-  if (!actorId || actorRole !== "SuperAdmin") {
-    return res.status(401).json({ message: "Access denied" });
+  const actorRole = auditActorRole(req);
+  if (!actorId || !can(req.user, "easybuy.superadmin.access")) {
+    // Authenticated without the permission is a 403, not a 401: re-sending the same
+    // token cannot help, and 401 is what sends a client into a re-login loop.
+    return res.status(403).json({ message: "Access denied" });
   }
 
   const requestId = normalizeString(req.params?.requestId);
@@ -1149,9 +1161,11 @@ export const SuperAdminApprovePublicEasyBuyRequest = async (req: Request, res: R
 
 export const SuperAdminRejectPublicEasyBuyRequest = async (req: Request, res: Response) => {
   const actorId = req.user?._id;
-  const actorRole = req.user?.role;
-  if (!actorId || actorRole !== "SuperAdmin") {
-    return res.status(401).json({ message: "Access denied" });
+  const actorRole = auditActorRole(req);
+  if (!actorId || !can(req.user, "easybuy.superadmin.access")) {
+    // Authenticated without the permission is a 403, not a 401: re-sending the same
+    // token cannot help, and 401 is what sends a client into a re-login loop.
+    return res.status(403).json({ message: "Access denied" });
   }
 
   const requestId = normalizeString(req.params?.requestId);
@@ -1228,9 +1242,11 @@ export const SuperAdminRejectPublicEasyBuyRequest = async (req: Request, res: Re
 
 export const SuperAdminConvertPublicEasyBuyRequest = async (req: Request, res: Response) => {
   const actorId = req.user?._id;
-  const actorRole = req.user?.role;
-  if (!actorId || actorRole !== "SuperAdmin") {
-    return res.status(401).json({ message: "Access denied" });
+  const actorRole = auditActorRole(req);
+  if (!actorId || !can(req.user, "easybuy.superadmin.access")) {
+    // Authenticated without the permission is a 403, not a 401: re-sending the same
+    // token cannot help, and 401 is what sends a client into a re-login loop.
+    return res.status(403).json({ message: "Access denied" });
   }
 
   const requestId = normalizeString(req.params?.requestId);

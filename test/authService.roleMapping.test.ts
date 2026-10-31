@@ -1,13 +1,16 @@
 import mongoose from "mongoose";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import UserModel from "../Model/UserModel.js";
-import { syncLocalShadowUser, toLegacyRole, type AuthServiceUser } from "../Service/AuthService.js";
+import { parsePlatformRole, syncLocalShadowUser, type AuthServiceUser } from "../Service/AuthService.js";
 
-// Auth returns the platform roles (`User | Admin | SuperAdmin`), while this service's older code
-// and its `AuthServiceRole` type name them in lowercase. A mismatch is not loud: the shadow user is
-// simply written as `User`, so a platform admin silently loses their staff rights in EasyBuy — and
-// with the Apply approval gate (which staff bypass) that would strand them on the customer screen.
-// Both spellings are accepted; anything unrecognised falls back to `User`, never to a staff role.
+// Auth returns the platform roles (`User | Admin | SuperAdmin`); older deployments answer in
+// lowercase. Both spellings resolve to the canonical one, so neither casing can demote a platform
+// admin to a customer in EasyBuy — and with the Apply approval gate (which staff bypass) that
+// would strand them on the customer screen.
+//
+// Nothing unrecognised is coerced. `toLegacyRole` used to fall back to `"User"`, which made a
+// malformed role look like a working account; `parsePlatformRole` throws instead, so the request
+// fails loudly and an operator sees it (docs/rbac-unification.md, "fail closed").
 // Runs against the local replica set (setup-env), dropped at the end.
 
 beforeAll(async () => {
@@ -30,7 +33,7 @@ const authUser = (role: string): AuthServiceUser => ({
   role,
 });
 
-describe("toLegacyRole", () => {
+describe("parsePlatformRole", () => {
   it.each([
     ["Admin", "Admin"],
     ["admin", "Admin"],
@@ -38,13 +41,14 @@ describe("toLegacyRole", () => {
     ["superadmin", "SuperAdmin"],
     ["User", "User"],
     ["user", "User"],
-  ])("maps %s to %s", (input, expected) => {
-    expect(toLegacyRole(input)).toBe(expected);
+    ["  Admin  ", "Admin"],
+  ])("resolves %s to %s", (input, expected) => {
+    expect(parsePlatformRole(input)).toBe(expected);
   });
 
-  it("never promotes an unknown or missing role to staff", () => {
-    for (const value of ["", "  ", "root", "owner", null, undefined]) {
-      expect(toLegacyRole(value)).toBe("User");
+  it("refuses an unknown or missing role instead of calling it a customer", () => {
+    for (const value of ["", "  ", "root", "owner", "salesperson", null, undefined, 1, {}]) {
+      expect(() => parsePlatformRole(value)).toThrow(/unknown role from auth/);
     }
   });
 });

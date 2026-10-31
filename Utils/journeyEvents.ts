@@ -1,5 +1,6 @@
 import {
   easybuyItemCreated,
+  easybuyPaymentApproved,
   easybuyRequestApproved,
   easybuyRequestRejected,
   easybuyRequestSubmitted,
@@ -8,7 +9,7 @@ import {
 } from "@melvingadgets/platform-kit";
 import type { Request } from "express";
 import { rawDb } from "./messaging.js";
-import type { ServiceFee } from "./serviceFee.js";
+import { toKobo, type ServiceFee } from "./serviceFee.js";
 
 // The customer-journey events EasyBuy owns (kit journey.ts, RESELLER-PLAN.md §7). Each is
 // written in the SAME transaction as the change it describes (Shortwork/AGENTS.md §3.1):
@@ -92,3 +93,43 @@ export const publishItemCreated = (
       serviceFeeBps: item.fee.serviceFeeBps,
     },
   });
+
+/**
+ * A repayment proof was approved: the customer's money is now recorded as paid, and the invoice
+ * service issues the repayment document from this event (docs/invoice-service.md).
+ *
+ * `amount` is the receipt's **naira float** — `ReceiptModel.amount` predates the kobo rule — and is
+ * converted once, here, at the producer boundary (Shortwork/AGENTS.md §4.1). No float crosses a
+ * service boundary.
+ *
+ * `method` is "unknown" because the legacy receipt records no payment method; the field exists so
+ * the document can say how money arrived once EasyBuy starts capturing it, not so this call site can
+ * guess.
+ */
+export const publishPaymentApproved = (
+  session: MongoSession,
+  traceId: string,
+  payment: {
+    receiptId: string;
+    personId: string | null;
+    itemId: string | null;
+    amount: number;
+    plan: string;
+    approvedAt: Date;
+  },
+) => {
+  const plan = payment.plan === "Weekly" || payment.plan === "Monthly" ? payment.plan : "Monthly";
+  return publishInTransaction(rawDb(), session, easybuyPaymentApproved, {
+    subject: subjectFor("receipt", payment.receiptId, payment.personId),
+    traceId,
+    data: {
+      receiptId: payment.receiptId,
+      personId: payment.personId,
+      itemId: payment.itemId,
+      amountKobo: toKobo(payment.amount),
+      plan,
+      method: "unknown" as const,
+      approvedAt: payment.approvedAt.toISOString(),
+    },
+  });
+};

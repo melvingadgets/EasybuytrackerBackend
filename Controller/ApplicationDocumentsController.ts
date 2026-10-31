@@ -16,6 +16,8 @@ import {
   type DocumentKind,
 } from "../Utils/applicationDocuments.js";
 import { documentStorage, type StoredFile } from "../Utils/documentStorage.js";
+import { can } from "@melvingadgets/platform-kit";
+import { auditActorRole } from "../Utils/auditActor.js";
 
 // Application documents (Utils/applicationDocuments.ts). Applicants add them after submitting;
 // a SuperAdmin needs all three to approve. Nothing here logs a NIN, a file or a link.
@@ -269,7 +271,8 @@ export const ClaimApplication = async (req: Request, res: Response) => {
 
 export const SuperAdminGetApplicationDocuments = async (req: Request, res: Response) => {
   const actorId = req.user?._id;
-  if (!actorId || req.user?.role !== "SuperAdmin") return res.status(401).json({ message: "Access denied" });
+  // Permission, not the role string; 403 because the caller is authenticated.
+  if (!actorId || !can(req.user, "easybuy.superadmin.access")) return res.status(403).json({ message: "Access denied" });
   const requestId = requestIdOf(req);
   const request = await PublicEasyBuyRequestModel.findOne({ requestId }).select("requestId status personId documentsRequired").lean();
   if (!request) return res.status(404).json({ message: "Public request not found" });
@@ -280,7 +283,7 @@ export const SuperAdminGetApplicationDocuments = async (req: Request, res: Respo
   // Viewing someone's ID documents is recorded (who, which request, when).
   await AuditLogModel.create({
     actor: new mongoose.Types.ObjectId(actorId),
-    actorRole: "SuperAdmin",
+    actorRole: auditActorRole(req),
     action: "PUBLIC_REQUEST_DOCUMENTS_VIEW",
     targetType: "publicrequest",
     targetId: request._id,

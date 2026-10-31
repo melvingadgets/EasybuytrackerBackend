@@ -741,7 +741,7 @@ export const TrackPublicEvent = async (req: Request, res: Response) => {
 
     await EasyBuyEventModel.create({
       anonymousId,
-      event,
+      event: event as (typeof PUBLIC_EVENT_TYPES)[number],
       meta,
       ...(provider ? { provider } : {}),
       ...(utmSource ? { utmSource } : {}),

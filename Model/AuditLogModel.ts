@@ -1,6 +1,6 @@
 import mongoose from "mongoose";
 
-type AuditActorRole = "Admin" | "SuperAdmin";
+export type AuditActorRole = "Admin" | "SuperAdmin";
 type AuditAction =
   | "USER_DELETE"
   | "RECEIPT_APPROVE"

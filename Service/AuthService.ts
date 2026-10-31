@@ -1,17 +1,17 @@
 import UserModel from "../Model/UserModel.js";
 import { config } from "../config/Config.js";
+import { isPlatformRole, type PlatformRole } from "@melvingadgets/platform-kit";
 
 export type AuthServiceRole = "user" | "admin" | "superadmin";
-export type LegacyRole = "User" | "Admin" | "SuperAdmin";
 
 export type AuthServiceUser = {
   _id: string;
   email: string;
   fullName: string;
-  // Auth's canonical platform roles are `User | Admin | SuperAdmin` (rules §4.4) — this is a
-  // response, not a request, so it is not `AuthServiceRole`. It accepts the lowercase spelling too
-  // because older deployments answered that way; `toLegacyRole` normalises either to `LegacyRole`.
-  role: LegacyRole | AuthServiceRole;
+  // Auth's canonical platform roles are `User | Admin | SuperAdmin` (rules §4.4). Older
+  // deployments answered in lowercase, so this stays a plain `string` at the boundary and is
+  // parsed by `parsePlatformRole` on the way in — never coerced.
+  role: PlatformRole | AuthServiceRole | string;
   emailVerified?: boolean;
   disabled?: boolean;
   originApp?: string;
@@ -21,7 +21,7 @@ export type LocalShadowUser = {
   _id: string;
   fullName: string;
   email: string;
-  role: LegacyRole;
+  role: PlatformRole;
   createdUsers?: string[];
   createdByAdmin?: string | null;
   manualNextDueDate?: Date | null;
@@ -41,30 +41,24 @@ type AuthServiceResponse<T> = {
   user?: AuthServiceUser;
 };
 
-const AUTH_ROLE_MAP: Record<LegacyRole, AuthServiceRole> = {
-  User: "user",
-  Admin: "admin",
-  SuperAdmin: "superadmin",
-};
-
-// Auth stores and returns the platform roles (`User | Admin | SuperAdmin`, rules §4.4), but this
-// service's older callers and the `AuthServiceRole` type name them in lowercase. Accept both rather
-// than trusting one casing: guessing wrong here silently demotes every platform admin to `User`.
-export const toLegacyRole = (role: string | undefined | null): LegacyRole => {
-  switch (String(role ?? "").trim().toLowerCase()) {
-    case "admin":
-      return "Admin";
-    case "superadmin":
-      return "SuperAdmin";
-    default:
-      return "User";
-  }
-};
-
-export const toAuthRole = (role: string | undefined | null): AuthServiceRole => {
-  if (role === "Admin" || role === "admin") return "admin";
-  if (role === "SuperAdmin" || role === "superadmin") return "superadmin";
-  return "user";
+/**
+ * Parses a role coming from auth into the canonical platform spelling.
+ *
+ * The old `toLegacyRole` fell back to `"User"` for anything it did not recognise, which turned a
+ * malformed role into a working, under-privileged account. There is no fallback here: an unknown
+ * or missing role throws, the caller's request fails, and an operator sees it.
+ *
+ * Lowercase is still accepted on input because auth itself accepts it (`normalizeRoleInput`), and
+ * a mixed fleet may still answer that way. Both spellings resolve to the same canonical value, so
+ * neither casing can silently demote anybody.
+ */
+export const parsePlatformRole = (role: unknown): PlatformRole => {
+  if (isPlatformRole(role)) return role;
+  const normalized = String(role ?? "").trim().toLowerCase();
+  if (normalized === "user") return "User";
+  if (normalized === "admin") return "Admin";
+  if (normalized === "superadmin") return "SuperAdmin";
+  throw new Error(`unknown role from auth: ${JSON.stringify(role ?? null)}`);
 };
 
 const buildUrl = (path: string, query?: Record<string, string | number | undefined>) => {
@@ -163,7 +157,7 @@ export const syncLocalShadowUser = async (
   const update: Record<string, unknown> = {
     fullName: authUser.fullName,
     email: authUser.email.toLowerCase(),
-    role: toLegacyRole(authUser.role),
+    role: parsePlatformRole(authUser.role),
   };
 
   if (extra && Object.prototype.hasOwnProperty.call(extra, "createdByAdmin")) {
@@ -194,7 +188,9 @@ export const syncLocalShadowUser = async (
     _id: String(user._id),
     fullName: String(user.fullName || ""),
     email: String(user.email || ""),
-    role: String(user.role || "User") as LegacyRole,
+    // No `|| "User"`: this row was just upserted with a canonical role, so a value that no
+    // longer parses means something else wrote it, and the caller must find out.
+    role: parsePlatformRole(user.role),
     createdUsers: Array.isArray(user.createdUsers)
       ? user.createdUsers.map((item: unknown) => String(item))
       : [],
@@ -242,7 +238,7 @@ export const createAuthUser = async (token: string, payload: {
   email: string;
   password: string;
   fullName: string;
-  role: LegacyRole;
+  role: PlatformRole;
 }) =>
   requestAuthService<{ user: AuthServiceUser }>({
     method: "POST",
@@ -252,7 +248,7 @@ export const createAuthUser = async (token: string, payload: {
       email: payload.email,
       password: payload.password,
       fullName: payload.fullName,
-      role: AUTH_ROLE_MAP[payload.role],
+      role: payload.role,
     },
   });
 

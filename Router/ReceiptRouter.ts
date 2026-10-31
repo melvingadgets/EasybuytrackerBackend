@@ -1,5 +1,6 @@
 import express from "express";
-import { verifyToken, requireRole } from "../Middleware/verify.js";
+import { requirePermission } from "@melvingadgets/platform-kit";
+import { verifyToken } from "../Middleware/verify.js";
 import { upload } from "../Utils/Multer.js";
 import {
   UploadReceipt,
@@ -11,10 +12,11 @@ import {
 
 const router = express.Router();
 
-router.post("/upload", verifyToken, requireRole(["User", "Admin"]), upload, UploadReceipt);
-router.get("/my", verifyToken, requireRole(["User", "Admin"]), GetMyReceipts);
-router.get("/pending", verifyToken, requireRole(["SuperAdmin"]), GetPendingReceipts);
-router.patch("/:receiptId/approve", verifyToken, requireRole(["SuperAdmin"]), ApproveReceiptPayment);
-router.patch("/:receiptId/reject", verifyToken, requireRole(["SuperAdmin"]), RejectReceiptPayment);
+// Uploading is an ordinary customer action; approving is SuperAdmin work.
+router.post("/upload", verifyToken, requirePermission("easybuy.receipts.upload"), upload, UploadReceipt);
+router.get("/my", verifyToken, requirePermission("easybuy.receipts.upload"), GetMyReceipts);
+router.get("/pending", verifyToken, requirePermission("easybuy.receipts.approve"), GetPendingReceipts);
+router.patch("/:receiptId/approve", verifyToken, requirePermission("easybuy.receipts.approve"), ApproveReceiptPayment);
+router.patch("/:receiptId/reject", verifyToken, requirePermission("easybuy.receipts.approve"), RejectReceiptPayment);
 
 export default router;

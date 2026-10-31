@@ -5,6 +5,7 @@ import UserModel from "../Model/UserModel.js";
 import EasyBoughtItemModel from "../Model/EasyBoughtitem.js";
 import ReceiptModel from "../Model/ReceiptModel.js";
 import mongoose from "mongoose";
+import { hasMinRole } from "@melvingadgets/platform-kit";
 import { getDashboardMetrics, getLatestActivePlanForUser } from "../Service/DashboardService.js";
 
 const normalizeFullName = (firstName?: string, lastName?: string, fullName?: string) => {
@@ -295,7 +296,9 @@ export const CreateEasyBuyPlan = async (req: Request, res: Response) => {
     const actorId = req.user?._id;
     const { userId, totalAmount, startDate, endDate } = req.body;
 
-    const targetUserId = actorRole === "Admin" && userId ? userId : actorId;
+    // `=== "Admin"` excluded a SuperAdmin, who then silently operated on their OWN
+    // account instead of the requested one. Ask whether they are staff at all.
+    const targetUserId = hasMinRole({ role: actorRole }, "Admin") && userId ? userId : actorId;
     if (!targetUserId) {
       return res.status(401).json({ message: "Access denied" });
     }
@@ -353,7 +356,9 @@ export const CreatePayment = async (req: Request, res: Response) => {
     const actorId = req.user?._id;
     const { userId, planId, amount, status = "paid", paymentMethod, paidAt } = req.body;
 
-    const targetUserId = actorRole === "Admin" && userId ? userId : actorId;
+    // `=== "Admin"` excluded a SuperAdmin, who then silently operated on their OWN
+    // account instead of the requested one. Ask whether they are staff at all.
+    const targetUserId = hasMinRole({ role: actorRole }, "Admin") && userId ? userId : actorId;
     if (!targetUserId) {
       return res.status(401).json({ message: "Access denied" });
     }

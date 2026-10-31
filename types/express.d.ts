@@ -1,11 +1,13 @@
 import { Request } from 'express';
-import type { ServiceCaller, UserCaller } from '@melvingadgets/platform-kit';
+import type { DomainRole, ServiceCaller, UserCaller } from '@melvingadgets/platform-kit';
 
 interface User {
   _id: string;
   userName: string;
   email: string;
   role: "User" | "Admin" | "SuperAdmin";
+  // Verified from the token. Never synthesised: a missing role is a 401, not "User".
+  domainRoles?: readonly DomainRole[];
   jti?: string;
 }
 

@@ -16,7 +16,7 @@ import {
 } from "../Utils/providers/helpers.js";
 import { getDefaultProvider } from "../Utils/providers/registry.js";
 import type { CatalogEntry, FinanceProvider } from "../Utils/providers/types.js";
-import { inTransaction } from "@melvingadgets/platform-kit";
+import { can, hasMinRole, inTransaction } from "@melvingadgets/platform-kit";
 import { publishItemCreated, traceIdOf } from "../Utils/journeyEvents.js";
 import { mongoClient } from "../Utils/messaging.js";
 import { computeServiceFee, toKobo } from "../Utils/serviceFee.js";
@@ -190,8 +190,9 @@ const createLocalUserRecord = async (args: {
 
 
 export const CreateAdmin = async (req: Request, res: Response) => {
-  const checkrole = req.user?.role;
-  if (checkrole !== "SuperAdmin") {
+  // The route already requires `easybuy.admins.create`. This second check reads the same
+  // permission rather than re-comparing a role string, so the two cannot drift apart.
+  if (!can(req.user, "easybuy.admins.create")) {
     return res.status(403).json({
       message: "You are not authorized to create admin",
     });
@@ -288,12 +289,13 @@ export const LoginUser = async (
   } 
 };
 export const CreateUser = async (req: Request, res: Response) => {
-const checkrole = req.user?.role;
-if(checkrole !== "Admin"){
-  return res.status(404).json({
-    message: "You are not authorized to create user",
-  });
-}
+  // Rank, not equality: `!== "Admin"` locked a SuperAdmin out of creating a user.
+  // 403 rather than 404 — the route is not a secret, and 404 hid the cause.
+  if (!hasMinRole({ role: req.user?.role }, "Admin")) {
+    return res.status(403).json({
+      message: "You are not authorized to create user",
+    });
+  }
   try {
     const { firstName, email, lastName, fullName, Password } = req.body;
     const normalizedFullName = normalizeFullName(firstName, lastName, fullName);
@@ -372,9 +374,9 @@ try {
 export const GetAllUsers = async (req: Request, res: Response) => {
   
     try {
-      const checkrole = req.user?.role;  
-    if (checkrole !== "Admin") {
-      return res.status(404).json({
+      // Rank, not equality: this also refused a SuperAdmin. 403, not 404 (see CreateUser).
+    if (!hasMinRole({ role: req.user?.role }, "Admin")) {
+      return res.status(403).json({
         message: "Access denied",
       });
     }
@@ -476,9 +478,9 @@ export const GetEasyBuyCatalogImage = async (req: Request, res: Response) => {
 };
 
 export const CreateEasyBoughtItem = async (req: Request, res: Response) => {
-    const checkrole = req.user?.role;  
-    if (checkrole !== "Admin") {
-      return res.status(404).json({
+    // Rank, not equality: this also refused a SuperAdmin. 403, not 404 (see CreateUser).
+    if (!hasMinRole({ role: req.user?.role }, "Admin")) {
+      return res.status(403).json({
         message: "Access denied",
       });
     }

@@ -1,4 +1,5 @@
 import type { NextFunction, Request, Response } from "express";
+import { isDomainRole, isPlatformRole } from "@melvingadgets/platform-kit";
 import jwt, { type JwtPayload } from "jsonwebtoken";
 import SessionModel from "../Model/SessionModel.js";
 import UserModel from "../Model/UserModel.js";
@@ -23,7 +24,9 @@ type TokenPayload = JwtPayload & {
   _id: string;
   fullName?: string;
   userName?: string;
-  role: "user" | "admin" | "superadmin" | AppRole;
+  // The canonical spelling only. The lowercase dialect is refused by `isPlatformRole`
+  // below rather than mapped, so a legacy token with `"admin"` fails closed.
+  role?: unknown;
   email: string;
   jti?: string;
 };
@@ -100,11 +103,18 @@ export const verifyToken = async (req: Request, res: Response, next: NextFunctio
         return res.status(401).json({ message: "user not found" });
       }
 
+      // The role is the *verified claim*, not the local record. A role change in auth
+      // now takes effect on the next token, without waiting for this shadow row to sync,
+      // and there is no local value to fall back to.
+      if (!isPlatformRole(person.role)) {
+        return res.status(401).json({ message: "invalid token payload" });
+      }
       const platformUser: Request["user"] = {
         _id: String(user._id),
         userName: String(user.fullName || ""),
         email: String(user.email || ""),
-        role: String(user.role || "User") as AppRole,
+        role: person.role,
+        domainRoles: person.domainRoles,
       };
       // The session lives in auth; the short-lived token plus (future) revocation
       // events are the check here, so there's no local SessionModel lookup.
@@ -147,11 +157,18 @@ export const verifyToken = async (req: Request, res: Response, next: NextFunctio
       }
     }
 
+    // No `|| "User"` fallback: a record whose role is missing or not canonical is a
+    // 401, not an ordinary account. Defaulting here is what let a broken role look
+    // like a working login.
+    if (!isPlatformRole(user.role)) {
+      return res.status(401).json({ message: "invalid token payload" });
+    }
     const currentUser: Request["user"] = {
       _id: String(user._id),
       userName: String(user.fullName || payload.fullName || payload.userName || ""),
       email: String(user.email || payload.email || ""),
-      role: String(user.role || "User") as AppRole,
+      role: user.role,
+      domainRoles: Array.isArray(payload.domainRoles) ? payload.domainRoles.filter(isDomainRole) : [],
     };
     if (payload.jti) {
       currentUser.jti = String(payload.jti);
@@ -166,13 +183,7 @@ export const verifyToken = async (req: Request, res: Response, next: NextFunctio
   }
 };
 
-export const requireRole =
-  (allowedRoles: Array<AppRole>) => (req: Request, res: Response, next: NextFunction) => {
-    const role = req.user?.role;
-    if (!role || !allowedRoles.includes(role)) {
-      return res.status(403).json({
-        message: "Access denied",
-      });
-    }
-    next();
-  };
+// `requireRole` used to live here. It's gone: every route now names the permission it
+// needs from `@melvingadgets/platform-kit` (docs/rbac-unification.md). The old version
+// was also wrong in a way that mattered — `requireRole(["Admin"])` returned 403 for a
+// SuperAdmin, because it compared a list instead of a rank.

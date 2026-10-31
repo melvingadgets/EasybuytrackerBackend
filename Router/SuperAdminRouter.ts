@@ -1,5 +1,6 @@
 import express from "express";
-import { verifyToken, requireRole } from "../Middleware/verify.js";
+import { requirePermission } from "@melvingadgets/platform-kit";
+import { verifyToken } from "../Middleware/verify.js";
 import {
   SuperAdminDeleteUserOrAdmin,
   SuperAdminGetAllUsers,
@@ -24,44 +25,44 @@ import { SuperAdminGetApplicationDocuments } from "../Controller/ApplicationDocu
 
 const router = express.Router();
 
-router.get("/users", verifyToken, requireRole(["SuperAdmin"]), SuperAdminGetAllUsers);
+router.get("/users", verifyToken, requirePermission("easybuy.superadmin.access"), SuperAdminGetAllUsers);
 router.get(
   "/users-with-items",
   verifyToken,
-  requireRole(["SuperAdmin"]),
+  requirePermission("easybuy.superadmin.access"),
   SuperAdminGetUsersWithEasyBoughtItems
 );
 router.delete(
   "/users/:userId",
   verifyToken,
-  requireRole(["SuperAdmin"]),
+  requirePermission("easybuy.superadmin.access"),
   SuperAdminDeleteUserOrAdmin
 );
-router.get("/login-stats", verifyToken, requireRole(["SuperAdmin"]), SuperAdminGetLoginStats);
-router.get("/easybuy-pricing", verifyToken, requireRole(["SuperAdmin"]), SuperAdminGetEasyBuyPricing);
-router.patch("/easybuy-pricing", verifyToken, requireRole(["SuperAdmin"]), SuperAdminUpdateEasyBuyPricing);
+router.get("/login-stats", verifyToken, requirePermission("easybuy.superadmin.access"), SuperAdminGetLoginStats);
+router.get("/easybuy-pricing", verifyToken, requirePermission("easybuy.superadmin.access"), SuperAdminGetEasyBuyPricing);
+router.patch("/easybuy-pricing", verifyToken, requirePermission("easybuy.superadmin.access"), SuperAdminUpdateEasyBuyPricing);
 router.get(
   "/public-easybuy-analytics",
   verifyToken,
-  requireRole(["SuperAdmin"]),
+  requirePermission("easybuy.superadmin.access"),
   SuperAdminGetPublicEasyBuyAnalytics
 );
 router.get(
   "/public-easybuy-abandoned-drafts",
   verifyToken,
-  requireRole(["SuperAdmin"]),
+  requirePermission("easybuy.superadmin.access"),
   SuperAdminListAbandonedPublicEasyBuyDrafts
 );
 router.get(
   "/public-easybuy-requests",
   verifyToken,
-  requireRole(["SuperAdmin"]),
+  requirePermission("easybuy.superadmin.access"),
   SuperAdminListPublicEasyBuyRequests
 );
 router.get(
   "/public-easybuy-requests/:requestId/documents",
   verifyToken,
-  requireRole(["SuperAdmin"]),
+  requirePermission("easybuy.superadmin.access"),
   (req, res, next) => {
     SuperAdminGetApplicationDocuments(req, res).catch(next);
   }
@@ -69,55 +70,55 @@ router.get(
 router.patch(
   "/public-easybuy-requests/:requestId/approve",
   verifyToken,
-  requireRole(["SuperAdmin"]),
+  requirePermission("easybuy.superadmin.access"),
   SuperAdminApprovePublicEasyBuyRequest
 );
 router.patch(
   "/public-easybuy-requests/:requestId/reject",
   verifyToken,
-  requireRole(["SuperAdmin"]),
+  requirePermission("easybuy.superadmin.access"),
   SuperAdminRejectPublicEasyBuyRequest
 );
 router.post(
   "/public-easybuy-requests/:requestId/convert",
   verifyToken,
-  requireRole(["SuperAdmin"]),
+  requirePermission("easybuy.superadmin.access"),
   SuperAdminConvertPublicEasyBuyRequest
 );
 router.get(
   "/maintenance/receipts/:receiptId/uploaded-date/preview",
   verifyToken,
-  requireRole(["SuperAdmin"]),
+  requirePermission("easybuy.superadmin.access"),
   SuperAdminPreviewReceiptUploadedDate
 );
 router.patch(
   "/maintenance/receipts/:receiptId/uploaded-date",
   verifyToken,
-  requireRole(["SuperAdmin"]),
+  requirePermission("easybuy.superadmin.access"),
   SuperAdminUpdateReceiptUploadedDate
 );
 router.get(
   "/maintenance/users/:userId/next-due-date/preview",
   verifyToken,
-  requireRole(["SuperAdmin"]),
+  requirePermission("easybuy.superadmin.access"),
   SuperAdminPreviewUserNextDueDate
 );
 router.patch(
   "/maintenance/users/:userId/next-due-date",
   verifyToken,
-  requireRole(["SuperAdmin"]),
+  requirePermission("easybuy.superadmin.access"),
   SuperAdminUpdateUserNextDueDate
 );
 router.get(
   "/maintenance/items/:itemId/created-date/preview",
   verifyToken,
-  requireRole(["SuperAdmin"]),
+  requirePermission("easybuy.superadmin.access"),
   SuperAdminPreviewItemCreatedDate
 );
 router.patch(
   "/maintenance/items/:itemId/created-date",
   verifyToken,
-  requireRole(["SuperAdmin"]),
+  requirePermission("easybuy.superadmin.access"),
   SuperAdminUpdateItemCreatedDate
 );
 
