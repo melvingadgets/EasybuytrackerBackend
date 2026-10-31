@@ -1,5 +1,6 @@
 import { renderEmailTemplate } from "./EmailTemplates.js";
 import { config } from "../config/Config.js";
+import { sendAuthServiceEmail } from "../Service/AuthService.js";
 
 const mailProvider = config.mail.provider;
 const gmailUser = config.mail.smtp.gmailUser;
@@ -143,8 +144,32 @@ export const sendEasyBuyVerificationEmail = async (payload: {
   capacity: string;
   plan: "Monthly" | "Weekly";
 }) => {
+  // If unified-auth-service is configured, route mail through it
+  if (config.auth.serviceUrl && config.auth.serviceKey) {
+    try {
+      await sendAuthServiceEmail({
+        to: payload.to,
+        subject: `Verify your EasyBuy request (${payload.requestId})`,
+        template: "generic-notification",
+        context: {
+          title: "Verify your EasyBuy request",
+          userName: payload.fullName,
+          message: `Your EasyBuy installment request (${payload.requestId}) for an iPhone ${payload.iphoneModel} (${payload.capacity}, ${payload.plan} plan) is ready for verification.`,
+          actionUrl: payload.verifyUrl,
+          actionText: "Verify Request",
+          footerNote: "If you did not initiate this request, you can safely ignore this email.",
+        },
+      });
+      return;
+    } catch (error: any) {
+      console.warn(`[mailer] unified-auth-service mail delivery failed (${error.message}); attempting local fallback.`);
+    }
+  }
+
+  // Local fallback (if local SMTP or Resend credentials are configured)
   if (!mailFrom) {
-    throw new Error("MAIL_FROM must be set for outbound email");
+    console.warn(`[mailer] Outbound email skipped: neither unified-auth-service nor local MAIL_FROM configured.`);
+    return;
   }
 
   const html = await renderEmailTemplate("easybuy-request-verify.ejs", {

@@ -297,3 +297,19 @@ export const findAuthUserByEmail = async (token: string, email: string) => {
   }
   return exact;
 };
+
+export const sendAuthServiceEmail = async (payload: {
+  to: string;
+  subject: string;
+  template?: string;
+  context?: Record<string, unknown>;
+  html?: string;
+  text?: string;
+}) => {
+  return requestAuthService<{ success: boolean; messageId?: string; simulated?: boolean }>({
+    method: "POST",
+    path: "api/v1/auth/internal/mail/send",
+    serviceKey: true,
+    body: payload,
+  });
+};

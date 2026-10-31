@@ -41,20 +41,17 @@ const missingVars: string[] = []
 if (!dbUrl) missingVars.push('Database_url (or DATABASE_URL)')
 if (!portValue) missingVars.push('PORT (or port)')
 if (!jwtSecret) missingVars.push('JWT_SECRET')
-if (!mailFrom) missingVars.push('MAIL_FROM')
-if (!cloudinaryCloudName) missingVars.push('CLOUDINARY_CLOUD_NAME')
-if (!cloudinaryApiKey) missingVars.push('CLOUDINARY_API_KEY')
-if (!cloudinaryApiSecret) missingVars.push('CLOUDINARY_API_SECRET')
-if (mailProvider === 'smtp') {
-  if (!gmailUser) missingVars.push('GMAIL_USER (required when MAIL_PROVIDER=smtp)')
-  if (!gmailAppPassword) missingVars.push('GMAIL_APP_PASSWORD (required when MAIL_PROVIDER=smtp)')
-}
-if (mailProvider === 'resend' && !resendApiKey) {
-  missingVars.push('RESEND_API_KEY (required when MAIL_PROVIDER=resend)')
-}
 
 if (missingVars.length > 0) {
   throw new Error(`Missing required environment variables: ${missingVars.join(', ')}`)
+}
+
+// Mail and Cloudinary variables are optional fallback (centralized email is handled by unified-auth-service)
+if (!mailFrom) {
+  console.warn('[config] MAIL_FROM not set; direct outbound email is disabled. Email will route through unified-auth-service.')
+}
+if (!cloudinaryCloudName || !cloudinaryApiKey || !cloudinaryApiSecret) {
+  console.warn('[config] Cloudinary credentials not fully set; receipt and document file uploads will fail if invoked.')
 }
 
 export const config = {
