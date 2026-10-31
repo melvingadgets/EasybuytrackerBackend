@@ -303,13 +303,19 @@ export const sendAuthServiceEmail = async (payload: {
   subject: string;
   template?: string;
   context?: Record<string, unknown>;
+  data?: Record<string, unknown>;
   html?: string;
   text?: string;
 }) => {
+  const mergedData = { ...(payload.context || {}), ...(payload.data || {}) };
   return requestAuthService<{ success: boolean; messageId?: string; simulated?: boolean }>({
     method: "POST",
     path: "api/v1/auth/internal/mail/send",
     serviceKey: true,
-    body: payload,
+    body: {
+      ...payload,
+      data: mergedData,
+      context: mergedData,
+    },
   });
 };
