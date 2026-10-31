@@ -267,6 +267,23 @@ describe("convert → 8% service fee and easybuy.item.created", () => {
     expect(res.status).toBe(200);
     expect((await ItemModel.findOne({ sourceRequestId: requestId }).lean())?.personId).toBe("person-j");
   });
+
+  it("converts into a shadow account — _id is the person, no personId field — as auth sign-ups create it", async () => {
+    // The usual production shape (Service/AuthService.ts syncLocalShadowUser). The first version of the
+    // F-1 fix refused it; the e2e conversion flow caught that.
+    const person = new mongoose.Types.ObjectId().toString();
+    const applied = await apply(await userToken(person));
+    const requestId = applied.body.data.requestId;
+    const email = (await RequestModel.findOne({ requestId }).lean())!.email;
+    await UserModel.create({ _id: new mongoose.Types.ObjectId(person), fullName: "Ada Obi", email, role: "User" });
+    await withDocuments(requestId);
+    await request(app).post(`/admin/${requestId}/approve`).send({});
+
+    const res = await request(app).post(`/admin/${requestId}/convert`).send({ phonePrice: 1_200_000, monthlyPlan: 3 });
+    expect(res.status).toBe(200);
+    expect((await ItemModel.findOne({ sourceRequestId: requestId }).lean())?.personId).toBe(person);
+    expect((await outbox().findOne({ type: "easybuy.item.created" }))?.data?.personId).toBe(person);
+  });
 });
 
 describe("GET /internal/people/:personId/journey", () => {

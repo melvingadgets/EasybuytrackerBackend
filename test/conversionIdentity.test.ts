@@ -34,6 +34,31 @@ describe("resolveConversionPersonId", () => {
     );
   });
 
+  it("accepts a shadow account, whose _id IS the person and which has no personId field", () => {
+    // syncLocalShadowUser creates exactly this for anyone who signed up through auth — the usual case.
+    // The e2e conversion flow caught the first version of this fix refusing it.
+    const person = "6ae6727d4855bd96f118d5c7";
+    expect(resolveConversionPersonId({ requestPersonId: person, accountPersonId: undefined, accountId: person })).toBe(
+      person
+    );
+  });
+
+  it("still REFUSES a shadow account that belongs to a different person", () => {
+    expect(() =>
+      resolveConversionPersonId({
+        requestPersonId: "6ae6727d4855bd96f118d5c7",
+        accountPersonId: undefined,
+        accountId: "6ae6727d4dd31c44f15a2519",
+      })
+    ).toThrow(ConversionIdentityMismatchError);
+  });
+
+  it("never treats an _id as a person on its own: an anonymous request gets the account's field only", () => {
+    // Without a verified person on the request there is nothing to prove the _id is a person, so an
+    // older account's EasyBuy ObjectId can never leak into personId.
+    expect(resolveConversionPersonId({ requestPersonId: null, accountPersonId: undefined, accountId: "6ae6727d4dd31c44f15a2519" })).toBeNull();
+  });
+
   it("returns null when neither side carries an identity", () => {
     expect(resolveConversionPersonId({ requestPersonId: null, accountPersonId: null })).toBeNull();
     expect(resolveConversionPersonId({})).toBeNull();

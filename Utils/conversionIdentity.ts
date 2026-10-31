@@ -11,11 +11,11 @@
 //
 // The rule (docs/RELEASE-PLAN-2026-10-31.md, Phase 2.4): `personId` comes from the resolved account
 // ONLY, and the conversion is refused when the request carries a verified person the account does not.
-// That includes an account with no `personId` at all: the account was found by an email typed into
-// the Apply form, and a typed email is never proof of identity (AGENTS.md §1.4). An account is linked
-// to its person only by that person's own verified sign-in (`Middleware/verify.ts`, which matches on
-// the auth-verified email), so the remedy for a refusal is for the applicant to sign in, not for this
-// code to guess.
+// That includes an account linked to no person at all: it was found by an email typed into the Apply
+// form, and a typed email is never proof of identity (AGENTS.md §1.4). An account belongs to a person
+// only through that person's own verified sign-in — `Middleware/verify.ts` either links an older
+// account by the auth-verified email or creates a shadow whose `_id` is the person — so the remedy for
+// a refusal is for the applicant to sign in, not for this code to guess.
 //
 // Pure, so it can be tested without a replica set.
 
@@ -33,8 +33,10 @@ export class ConversionIdentityMismatchError extends Error {
 export interface ConversionIdentityInput {
   /** personId stored on the Apply request (set only from a verified Melvin token), if any. */
   requestPersonId?: unknown;
-  /** personId of the account resolved by email — the account the item is attributed to — if any. */
+  /** The `personId` field of the account resolved by email — set when an older account is linked. */
   accountPersonId?: unknown;
+  /** The `_id` of that account. A shadow account's `_id` IS its person (see below). */
+  accountId?: unknown;
 }
 
 const clean = (value: unknown): string | null => {
@@ -49,7 +51,16 @@ const clean = (value: unknown): string | null => {
  */
 export const resolveConversionPersonId = (input: ConversionIdentityInput): string | null => {
   const requestPersonId = clean(input.requestPersonId);
-  const accountPersonId = clean(input.accountPersonId);
+  const accountId = clean(input.accountId);
+
+  // An account carries its person in one of two ways. An older EasyBuy account linked on the person's
+  // first verified request has a `personId` field (Middleware/verify.ts). A shadow account — the usual
+  // case for anyone who signed up through auth — is created by syncLocalShadowUser with the person's
+  // auth id as its `_id` and NO `personId` field. An older account's `_id` is an EasyBuy ObjectId and
+  // never equals an auth person's, so an `_id` equal to the request's verified person proves the
+  // account was made for that person; it is not a typed email standing in for identity.
+  const accountPersonId =
+    clean(input.accountPersonId) ?? (requestPersonId && accountId === requestPersonId ? accountId : null);
 
   if (requestPersonId && requestPersonId !== accountPersonId) {
     throw new ConversionIdentityMismatchError();

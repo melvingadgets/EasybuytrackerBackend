@@ -1339,6 +1339,7 @@ export const SuperAdminConvertPublicEasyBuyRequest = async (req: Request, res: R
       const personId = resolveConversionPersonId({
         requestPersonId: (requestDoc as any).personId,
         accountPersonId: (user as any).personId,
+        accountId: user._id,
       });
 
       const payload: Record<string, unknown> = {
