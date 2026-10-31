@@ -24,6 +24,7 @@ import { can } from "@melvingadgets/platform-kit";
 import { auditActorRole } from "../Utils/auditActor.js";
 import { documentsSummaryByRequest, missingForApproval } from "./ApplicationDocumentsController.js";
 import { computeServiceFee, toKobo } from "../Utils/serviceFee.js";
+import { ConversionIdentityMismatchError, resolveConversionPersonId } from "../Utils/conversionIdentity.js";
 
 const normalizeReason = (value: unknown) => {
   const trimmed = String(value ?? "").trim();
@@ -1332,8 +1333,13 @@ export const SuperAdminConvertPublicEasyBuyRequest = async (req: Request, res: R
       const loanedAmount = Number((phonePrice - downPayment).toFixed(2));
       // The 8% service charge, fixed now and paid with the down payment (RESELLER-PLAN.md §8b).
       const fee = computeServiceFee({ phonePrice, loanedAmount });
-      // The applicant's person: from the Apply request (a verified token), else the linked account.
-      const personId = String((requestDoc as any).personId || (user as any).personId || "") || null;
+      // The item's auth identity must name the SAME person as the account it is attributed to
+      // (UserId/UserEmail); every downstream consumer keys on personId. It comes from the resolved
+      // account only, and a request verifiably submitted by anyone else is refused before any write (F-1).
+      const personId = resolveConversionPersonId({
+        requestPersonId: (requestDoc as any).personId,
+        accountPersonId: (user as any).personId,
+      });
 
       const payload: Record<string, unknown> = {
         provider: provider.slug,
@@ -1437,6 +1443,9 @@ export const SuperAdminConvertPublicEasyBuyRequest = async (req: Request, res: R
       data: responseData,
     });
   } catch (error: any) {
+    if (error instanceof ConversionIdentityMismatchError) {
+      return res.status(409).json({ message: error.message, code: error.code });
+    }
     const message = normalizeString(error?.message) || "Unknown error";
     const lower = message.toLowerCase();
     if (lower.includes("not found")) {

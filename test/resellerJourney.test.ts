@@ -180,7 +180,9 @@ describe("convert → 8% service fee and easybuy.item.created", () => {
     const applied = await apply(await userToken("person-c"));
     const requestId = applied.body.data.requestId;
     const email = (await RequestModel.findOne({ requestId }).lean())!.email;
-    await UserModel.create({ fullName: "Ada Obi", email, role: "User" });
+    // Linked to its person, as Middleware/verify.ts links it on the applicant's first verified request
+    // (matched on the auth-verified email). An unlinked account is refused — see the F-1 tests below.
+    await UserModel.create({ fullName: "Ada Obi", email, role: "User", personId: "person-c" });
     await withDocuments(requestId);
     await request(app).post(`/admin/${requestId}/approve`).send({});
 
@@ -210,6 +212,60 @@ describe("convert → 8% service fee and easybuy.item.created", () => {
         serviceFeeBps: 800,
       },
     });
+  });
+
+  // F-1 (docs/BUG-AUDIT-2026-10-31b.md): an item must never carry a personId that disagrees with the
+  // account it is attributed to. A refusal writes nothing — no item, no item.created event — and the
+  // request stays approved, so it can still be converted once the accounts are put right.
+  const expectNothingWritten = async (requestId: string) => {
+    expect(await ItemModel.countDocuments({ sourceRequestId: requestId })).toBe(0);
+    expect(await outbox().countDocuments({ type: "easybuy.item.created" })).toBe(0);
+    expect((await RequestModel.findOne({ requestId }).lean())?.status).toBe("approved");
+  };
+
+  it("refuses with 409 person_mismatch when userEmail points at someone else's account", async () => {
+    const applied = await apply(await userToken("person-g"));
+    const requestId = applied.body.data.requestId;
+    // The admin types another customer's email: a real account, linked to a different person.
+    await UserModel.create({ fullName: "Somebody Else", email: "someone-else@example.com", role: "User", personId: "person-h" });
+    await withDocuments(requestId);
+    await request(app).post(`/admin/${requestId}/approve`).send({});
+
+    const res = await request(app)
+      .post(`/admin/${requestId}/convert`)
+      .send({ phonePrice: 1_200_000, monthlyPlan: 3, userEmail: "someone-else@example.com" });
+    expect(res.status).toBe(409);
+    expect(res.body.code).toBe("person_mismatch");
+    await expectNothingWritten(requestId);
+  });
+
+  it("refuses with 409 person_mismatch when the account matching the typed email is linked to nobody", async () => {
+    const applied = await apply(await userToken("person-i"));
+    const requestId = applied.body.data.requestId;
+    const email = (await RequestModel.findOne({ requestId }).lean())!.email;
+    // The email was typed on the Apply form, so it proves nothing about who owns this account
+    // (AGENTS.md §1.4). The old code stamped person-i onto it.
+    await UserModel.create({ fullName: "Ada Obi", email, role: "User" });
+    await withDocuments(requestId);
+    await request(app).post(`/admin/${requestId}/approve`).send({});
+
+    const res = await request(app).post(`/admin/${requestId}/convert`).send({ phonePrice: 1_200_000, monthlyPlan: 3 });
+    expect(res.status).toBe(409);
+    expect(res.body.code).toBe("person_mismatch");
+    await expectNothingWritten(requestId);
+  });
+
+  it("still converts an anonymous application into the account its email resolves to", async () => {
+    const applied = await apply(); // no token: the request carries no person
+    const requestId = applied.body.data.requestId;
+    const email = (await RequestModel.findOne({ requestId }).lean())!.email;
+    await UserModel.create({ fullName: "Ada Obi", email, role: "User", personId: "person-j" });
+    await withDocuments(requestId);
+    await request(app).post(`/admin/${requestId}/approve`).send({});
+
+    const res = await request(app).post(`/admin/${requestId}/convert`).send({ phonePrice: 1_200_000, monthlyPlan: 3 });
+    expect(res.status).toBe(200);
+    expect((await ItemModel.findOne({ sourceRequestId: requestId }).lean())?.personId).toBe("person-j");
   });
 });
 
