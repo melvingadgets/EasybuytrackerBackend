@@ -3,3 +3,4 @@ dist
 build
 .env
 SECURITY_FIXES_TODO.md
+qa-report/

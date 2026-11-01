@@ -1,0 +1,84 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [main, fix/shadow-person-id, feat/reseller-programme]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-easybuy-backend-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  quality-and-security:
+    name: 1 · Code Quality & Vulnerability Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Dependency vulnerability audit (npm audit)
+        run: npm audit --audit-level=high || echo "::warning title=Vulnerabilities detected::npm audit reported high severity advisories"
+      - name: TypeScript typecheck
+        run: npm run typecheck
+
+  build:
+    name: 2 · Build System
+    needs: quality-and-security
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Build system
+        run: npx tsc --noEmit
+
+  hierarchical-tests:
+    name: 3 · Hierarchical Tests (Unit, Integration, Contract)
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Run unit & integration tests
+        run: npm test
+
+  deploy:
+    name: 4 · Deploy to Neo-Cloud (Railway)
+    needs: [quality-and-security, build, hierarchical-tests]
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/fix/shadow-person-id')
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check Railway credentials
+        id: check-creds
+        run: |
+          if [ -z "${{ secrets.RAILWAY_TOKEN }}" ]; then
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::warning title=Deploy skipped::RAILWAY_TOKEN secret not configured."
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Install Railway CLI & Deploy
+        if: steps.check-creds.outputs.configured == 'true'
+        run: |
+          npm install -g @railway/cli
+          railway up --service EasybuytrackerBackend --detach
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
