@@ -10,6 +10,7 @@ import ProfileModel from "../Model/Profilemodel.js";
 import PublicEasyBuyDraftModel from "../Model/PublicEasyBuyDraftModel.js";
 import PublicEasyBuyRequestModel from "../Model/PublicEasyBuyRequestModel.js";
 import ReceiptModel from "../Model/ReceiptModel.js";
+import RepaymentReminderModel from "../Model/RepaymentReminderModel.js";
 import SessionModel from "../Model/SessionModel.js";
 import UserModel from "../Model/UserModel.js";
 import { EASYBUY_CATALOG, normalizeCapacityInput } from "../Utils/EasyBuyCatalog.js";
@@ -257,7 +258,10 @@ export const SuperAdminDeleteUserOrAdmin = async (req: Request, res: Response) =
         );
       }
 
+      const itemIds = await EasyBoughtItemModel.find({ UserId: targetUser._id }).session(session).distinct("_id");
+
       await Promise.all([
+        RepaymentReminderModel.deleteMany({ itemId: { $in: itemIds } }, { session }),
         EasyBoughtItemModel.deleteMany({ UserId: targetUser._id }, { session }),
         EasyBuyPlanModel.deleteMany({ user: targetUser._id }, { session }),
         PaymentModel.deleteMany({ user: targetUser._id }, { session }),

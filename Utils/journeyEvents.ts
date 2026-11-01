@@ -1,6 +1,7 @@
 import {
   easybuyItemCreated,
   easybuyPaymentApproved,
+  easybuyRepaymentDue,
   easybuyRequestApproved,
   easybuyRequestRejected,
   easybuyRequestSubmitted,
@@ -133,3 +134,33 @@ export const publishPaymentApproved = (
     },
   });
 };
+
+/**
+ * An unpaid instalment reached a reminder stage (Service/RepaymentReminders.ts). Each instalment is
+ * its own subject, so its seq runs upcoming → due → overdue and auth drops an older stage that
+ * arrives after a newer one, while a late reminder for another instalment is still news.
+ */
+export const publishRepaymentDue = (
+  session: MongoSession,
+  traceId: string,
+  reminder: {
+    itemId: string;
+    personId: string;
+    instalment: number;
+    dueOn: string;
+    amountKobo: number;
+    stage: "upcoming" | "due" | "overdue";
+  },
+) =>
+  publishInTransaction(rawDb(), session, easybuyRepaymentDue, {
+    subject: { kind: "instalment", id: `${reminder.itemId}:${reminder.instalment}`, personId: reminder.personId },
+    traceId,
+    data: {
+      itemId: reminder.itemId,
+      personId: reminder.personId,
+      instalment: reminder.instalment,
+      dueOn: reminder.dueOn,
+      amountKobo: reminder.amountKobo,
+      stage: reminder.stage,
+    },
+  });

@@ -27,6 +27,10 @@ const authJwksUrl = String(process.env.AUTH_JWKS_URL ?? (authIssuer ? `${authIss
 // Publish domain events to the outbox (Shortwork/AGENTS.md §3). Off by default so the rollout is
 // additive (§7.1); needs a replica set (Atlas is one). Turn on once the relay is running.
 const eventsEnabled = String(process.env.EVENTS_ENABLED ?? '').trim().toLowerCase() === 'true'
+// Run the daily repayment reminder job in this process (Shortwork/docs/notifications.md §13). Needs
+// EVENTS_ENABLED, because a reminder is an event. Off by default: switch it on only once the relay
+// routes the event and auth reads it, or the event dead-letters at auth and the reminder is spent.
+const repaymentRemindersEnabled = String(process.env.REPAYMENT_REMINDERS_ENABLED ?? '').trim().toLowerCase() === 'true'
 // The EasyBuy service charge (RESELLER-PLAN.md §8b): 8% (800 basis points), paid with the down
 // payment and never refunded. The platform keeps half and a referring reseller earns half; with no
 // reseller the platform keeps all of it. The base defaults to the financed amount (phone price minus
@@ -66,6 +70,7 @@ export const config = {
     jwksUrl: authJwksUrl,
   },
   eventsEnabled,
+  repaymentRemindersEnabled,
   serviceFee: {
     bps: serviceFeeBps,
     base: serviceFeeBase as 'financed' | 'price',

@@ -5,6 +5,7 @@ import { MainApp } from "./MainApp.js";
 import path from "path";
 import Db from "./Database/Database.js";
 import { initOutbox } from "./Utils/messaging.js";
+import { startRepaymentReminders } from "./Service/RepaymentReminders.js";
 import type { Server } from "http";
 
 const port = config.port;
@@ -21,6 +22,7 @@ async function startserver() {
     server = app.listen(port, () => {
       console.log(`server is listening on port: ${port}`);
     });
+    startRepaymentReminders();
   } catch (error) {
     console.log("Database isnt Connecting");
   }
