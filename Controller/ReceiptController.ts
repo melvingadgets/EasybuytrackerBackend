@@ -29,11 +29,12 @@ const approvePendingReceipt = async (receiptId: string, approvedAt: Date, sessio
 /**
  * Who this receipt belongs to, for the invoice.
  *
- * `personId` is auth's id and comes only from the account's `personId` field — the same rule the
- * rest of EasyBuy uses (`UserController` when it stamps an item, `InternalController` when it looks
- * a person's journey up). An account with no field is **not linked to auth**, and the honest answer
- * is null: falling back to the account's `_id` would send an EasyBuy ObjectId as though it were an
- * auth personId, and the invoice service would address a financial document to a nonexistent person.
+ * `personId` is auth's id and comes only from the account's `personId` field — the same rule
+ * `UserController` uses when it stamps an item. A shadow carries it too (`syncLocalShadowUser`, and
+ * `migrate-shadow-person-ids` for older shadows). An account with no field is **not known to be
+ * linked to auth**, and the honest answer is null: falling back to the account's `_id` could send an
+ * EasyBuy ObjectId as though it were an auth personId, and the invoice service would address a
+ * financial document to a nonexistent person.
  *
  * The financed item is looked up by the owning account, which is how items created before items
  * carried `personId` are still found.

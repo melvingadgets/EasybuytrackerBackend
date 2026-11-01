@@ -60,13 +60,7 @@ afterEach(async () => {
 
 const outbox = () => mongoose.connection.db!.collection(OUTBOX_COLLECTION);
 
-const seed = async (options: { personId?: string | null; amount?: number } = {}) => {
-  await UserModel.create({
-    _id: new mongoose.Types.ObjectId(OWNER),
-    fullName: "Receipt Owner",
-    email: "owner@example.test",
-    ...(options.personId === null ? {} : { personId: options.personId ?? OWNER }),
-  });
+const seedItemAndReceipt = async (options: { amount?: number } = {}) => {
   const item = await ItemModel.create({
     provider: "aurapay",
     IphoneModel: "iPhone 13",
@@ -90,6 +84,16 @@ const seed = async (options: { personId?: string | null; amount?: number } = {})
     status: "pending",
   });
   return { receipt, item };
+};
+
+const seed = async (options: { personId?: string | null; amount?: number } = {}) => {
+  await UserModel.create({
+    _id: new mongoose.Types.ObjectId(OWNER),
+    fullName: "Receipt Owner",
+    email: "owner@example.test",
+    ...(options.personId === null ? {} : { personId: options.personId ?? OWNER }),
+  });
+  return seedItemAndReceipt(options);
 };
 
 describe("receipt approval → outbox", () => {
@@ -138,6 +142,32 @@ describe("receipt approval → outbox", () => {
     const event = await outbox().findOne({});
     expect((event?.data as { personId: unknown }).personId).toBeNull();
     expect((event?.subject as { personId?: unknown }).personId).toBeUndefined();
+  });
+
+  // E-2: most customers exist in EasyBuy as a shadow account, made on their first sign-in. Their event
+  // has to name them, or the invoice service can't address the document.
+  const expectEventNames = async (receiptId: unknown, personId: string) => {
+    expect((await request(app).post(`/approve/${receiptId}`).send({})).status).toBe(200);
+    const event = await outbox().findOne({ type: "easybuy.payment.approved" });
+    expect((event?.data as { personId: unknown }).personId).toBe(personId);
+    expect((event?.subject as { personId?: unknown }).personId).toBe(personId);
+  };
+
+  it("carries the person for a shadow customer", async () => {
+    const { syncLocalShadowUser } = await import("../Service/AuthService.js");
+    await syncLocalShadowUser({ _id: OWNER, email: "owner@example.test", fullName: "Receipt Owner", role: "User" });
+
+    const { receipt } = await seedItemAndReceipt();
+    await expectEventNames(receipt._id, OWNER);
+  });
+
+  it("carries the person for an older shadow once the backfill has confirmed and stamped it", async () => {
+    const { backfillShadowPersonIds } = await import("../Utils/shadowPerson.js");
+    const { receipt } = await seed({ personId: null });
+
+    await backfillShadowPersonIds({ isPerson: async (id) => id === OWNER, write: true });
+
+    await expectEventNames(receipt._id, OWNER);
   });
 
   it("writes no event when the receipt is not pending, and approves nothing twice", async () => {

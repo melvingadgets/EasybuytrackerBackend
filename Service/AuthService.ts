@@ -1,5 +1,6 @@
 import UserModel from "../Model/UserModel.js";
 import { config } from "../config/Config.js";
+import { isDuplicateKeyError, stampPersonId } from "../Utils/shadowPerson.js";
 import { isPlatformRole, type PlatformRole } from "@melvingadgets/platform-kit";
 
 export type AuthServiceRole = "user" | "admin" | "superadmin";
@@ -147,6 +148,15 @@ const requestAuthService = async <T>(args: {
   return payload;
 };
 
+/**
+ * Brings the person's EasyBuy account up to date, creating it if needed: a shadow whose `_id` and
+ * `personId` are both the auth person.
+ *
+ * What comes back is the account that holds the person, which isn't always the shadow. When a linked
+ * older account already holds them, the unique personId index refuses the shadow's claim (AGENTS.md
+ * §3.8), and that older account is returned untouched. So one person never gets two claiming accounts,
+ * and a personId an account already has is never overwritten.
+ */
 export const syncLocalShadowUser = async (
   authUser: AuthServiceUser,
   extra?: Partial<{
@@ -154,6 +164,7 @@ export const syncLocalShadowUser = async (
     addCreatedUserToAdminId: string;
   }>
 ): Promise<LocalShadowUser | null> => {
+  const personId = String(authUser._id);
   const update: Record<string, unknown> = {
     fullName: authUser.fullName,
     email: authUser.email.toLowerCase(),
@@ -164,21 +175,35 @@ export const syncLocalShadowUser = async (
     update.createdByAdmin = extra.createdByAdmin ? extra.createdByAdmin : null;
   }
 
-  const user = await UserModel.findOneAndUpdate(
-    { _id: authUser._id },
-    {
-      $set: update,
-      $setOnInsert: {
-        createdUsers: [],
-        manualNextDueDate: null,
+  const upsertShadow = async () => {
+    const shadow = await UserModel.findOneAndUpdate(
+      { _id: authUser._id },
+      {
+        $set: update,
+        $setOnInsert: {
+          personId,
+          createdUsers: [],
+          manualNextDueDate: null,
+        },
       },
-    },
-    { upsert: true, returnDocument: "after", setDefaultsOnInsert: true }
-  ).lean();
+      { upsert: true, returnDocument: "after", setDefaultsOnInsert: true }
+    ).lean();
+    // A shadow from before shadows carried the field.
+    if (shadow && !shadow.personId) await stampPersonId(shadow._id, personId);
+    return shadow;
+  };
+
+  const user = await upsertShadow().catch(async (error: unknown) => {
+    if (!isDuplicateKeyError(error)) throw error;
+    // A refusal for any other reason (another account has this email) is still the caller's to see.
+    const holder = await UserModel.findOne({ personId, _id: { $ne: authUser._id } }).lean();
+    if (!holder) throw error;
+    return holder;
+  });
 
   if (extra?.addCreatedUserToAdminId) {
     await UserModel.findByIdAndUpdate(extra.addCreatedUserToAdminId, {
-      $addToSet: { createdUsers: authUser._id },
+      $addToSet: { createdUsers: user?._id ?? authUser._id },
     });
   }
 

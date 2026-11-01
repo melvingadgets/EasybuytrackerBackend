@@ -1,4 +1,5 @@
 import type { Request, Response } from "express";
+import mongoose from "mongoose";
 import { MoneyError, isKobo, kobo, nairaToKobo, quoteInstalments, type Kobo } from "@melvingadgets/platform-kit";
 import EasyBoughtItemModel from "../Model/EasyBoughtitem.js";
 import PublicEasyBuyRequestModel from "../Model/PublicEasyBuyRequestModel.js";
@@ -118,8 +119,14 @@ export const GetInternalPersonJourney = async (req: Request, res: Response) => {
   const personId = String(req.params.personId ?? "");
   if (!PERSON_ID.test(personId)) return res.status(400).json({ message: "invalid personId" });
 
-  // Items made before items carried personId belong to the person's linked EasyBuy account.
-  const accounts = await UserModel.find({ personId }).select({ _id: 1 }).lean();
+  // Items made before items carried personId belong to the person's EasyBuy account. That's the one
+  // whose `personId` says so, or a shadow from before shadows carried the field: its `_id` is the person
+  // until migrate-shadow-person-ids reaches it. A field that names someone else wins over the `_id`.
+  const accounts = await UserModel.find({
+    $or: [{ personId }, ...(mongoose.isObjectIdOrHexString(personId) ? [{ _id: personId, personId: null }] : [])],
+  } as never)
+    .select({ _id: 1 })
+    .lean();
   const [requests, items] = await Promise.all([
     PublicEasyBuyRequestModel.find({ personId })
       .sort({ createdAt: 1 })

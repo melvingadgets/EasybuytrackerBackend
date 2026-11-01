@@ -53,12 +53,13 @@ export const resolveConversionPersonId = (input: ConversionIdentityInput): strin
   const requestPersonId = clean(input.requestPersonId);
   const accountId = clean(input.accountId);
 
-  // An account carries its person in one of two ways. An older EasyBuy account linked on the person's
-  // first verified request has a `personId` field (Middleware/verify.ts). A shadow account — the usual
-  // case for anyone who signed up through auth — is created by syncLocalShadowUser with the person's
-  // auth id as its `_id` and NO `personId` field. An older account's `_id` is an EasyBuy ObjectId and
-  // never equals an auth person's, so an `_id` equal to the request's verified person proves the
-  // account was made for that person; it is not a typed email standing in for identity.
+  // An account carries its person in one of two ways. Its `personId` field is the usual one: an older
+  // EasyBuy account linked on the person's first verified request (Middleware/verify.ts), or a shadow
+  // from syncLocalShadowUser. A shadow made before that set the field, and not yet reached by
+  // migrate-shadow-person-ids, has only its `_id`, which is the person's auth id. An older account's
+  // `_id` is an EasyBuy ObjectId and never equals an auth person's, so an `_id` equal to the request's
+  // verified person proves the account was made for that person; it is not a typed email standing in
+  // for identity.
   const accountPersonId =
     clean(input.accountPersonId) ?? (requestPersonId && accountId === requestPersonId ? accountId : null);
 

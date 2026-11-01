@@ -44,8 +44,9 @@ beforeAll(async () => {
   const { createPublicRouter } = await import("../Router/PublicRouter.js");
   const { createInternalRouter } = await import("../Router/InternalRouter.js");
   const admin = await import("../Controller/SuperAdminController.js");
+  const { CreateEasyBoughtItem } = await import("../Controller/UserController.js");
   const asSuperAdmin: express.RequestHandler = (req, _res, next) => {
-    (req as unknown as { user: unknown }).user = { _id: SUPERADMIN, role: "SuperAdmin" };
+    (req as unknown as { user: unknown }).user = { _id: SUPERADMIN, role: "SuperAdmin", email: "superadmin@example.test" };
     (req as unknown as { traceId: string }).traceId = "trace-reseller-test";
     next();
   };
@@ -57,6 +58,7 @@ beforeAll(async () => {
   app.post("/admin/:requestId/approve", asSuperAdmin, admin.SuperAdminApprovePublicEasyBuyRequest);
   app.post("/admin/:requestId/reject", asSuperAdmin, admin.SuperAdminRejectPublicEasyBuyRequest);
   app.post("/admin/:requestId/convert", asSuperAdmin, admin.SuperAdminConvertPublicEasyBuyRequest);
+  app.post("/admin/items", asSuperAdmin, CreateEasyBoughtItem);
 });
 
 afterAll(async () => {
@@ -268,9 +270,10 @@ describe("convert → 8% service fee and easybuy.item.created", () => {
     expect((await ItemModel.findOne({ sourceRequestId: requestId }).lean())?.personId).toBe("person-j");
   });
 
-  it("converts into a shadow account — _id is the person, no personId field — as auth sign-ups create it", async () => {
-    // The usual production shape (Service/AuthService.ts syncLocalShadowUser). The first version of the
-    // F-1 fix refused it; the e2e conversion flow caught that.
+  it("converts into an older shadow account — _id is the person, no personId field yet", async () => {
+    // What Service/AuthService.ts syncLocalShadowUser made before it stamped the field, and still the
+    // shape in production until migrate-shadow-person-ids runs. The first version of the F-1 fix
+    // refused it; the e2e conversion flow caught that.
     const person = new mongoose.Types.ObjectId().toString();
     const applied = await apply(await userToken(person));
     const requestId = applied.body.data.requestId;
@@ -304,6 +307,99 @@ describe("GET /internal/people/:personId/journey", () => {
     expect(res.body.requests).toHaveLength(1);
     expect(res.body.requests[0]).toMatchObject({ requestId: applied.body.data.requestId, status: "verified", model: "iPhone 13" });
     expect(JSON.stringify(res.body)).not.toMatch(/example\.com|\+234|Ada/);
+  });
+
+  // E-2: a shadow customer's items that carry no personId of their own can only be found through the
+  // account. Looking the account up by `personId` alone missed all of them.
+  describe("a shadow customer's items", () => {
+    const shadowPerson = (email: string) => ({ _id: new mongoose.Types.ObjectId().toString(), email, fullName: "Shadow Customer", role: "User" });
+    // An item an admin created before accounts carried the person: it names only its account.
+    const itemWithoutPerson = (accountId: string, email: string) =>
+      ItemModel.create({
+        provider: "aurapay",
+        IphoneModel: "iPhone 13",
+        IphoneImageUrl: "https://example.test/x.png",
+        capacity: "128GB",
+        Plan: "Monthly",
+        monthlyPlan: 3,
+        downPayment: 480_000,
+        loanedAmount: 720_000,
+        PhonePrice: 1_200_000,
+        UserId: new mongoose.Types.ObjectId(accountId),
+        UserEmail: email,
+      });
+    const journeyItems = async (personId: string) => {
+      const res = await request(app)
+        .get(`/api/v1/internal/people/${personId}/journey`)
+        .set("authorization", await serviceToken(["easybuy:journey.read"]));
+      expect(res.status).toBe(200);
+      return res.body.items.map((item: { itemId: string }) => item.itemId);
+    };
+
+    it("finds a shadow customer's admin-created item through the stamped account, and shows it to nobody else", async () => {
+      const { syncLocalShadowUser } = await import("../Service/AuthService.js");
+      const person = shadowPerson("shadow-stamped@example.test");
+      await syncLocalShadowUser(person);
+      const item = await itemWithoutPerson(person._id, person.email);
+      expect(item.personId).toBeUndefined();
+
+      expect(await journeyItems(person._id)).toEqual([String(item._id)]);
+      expect(await journeyItems(new mongoose.Types.ObjectId().toString())).toEqual([]);
+    });
+
+    it("finds it before the backfill has reached the shadow, by the account's _id", async () => {
+      const person = shadowPerson("shadow-older@example.test");
+      await UserModel.create({ _id: new mongoose.Types.ObjectId(person._id), fullName: person.fullName, email: person.email });
+      const item = await itemWithoutPerson(person._id, person.email);
+
+      expect(await journeyItems(person._id)).toEqual([String(item._id)]);
+    });
+
+    it("trusts the field over the _id once an account names someone else", async () => {
+      const person = shadowPerson("shadow-relinked@example.test");
+      const other = new mongoose.Types.ObjectId().toString();
+      await UserModel.create({ _id: new mongoose.Types.ObjectId(person._id), fullName: person.fullName, email: person.email, personId: other });
+      const item = await itemWithoutPerson(person._id, person.email);
+
+      expect(await journeyItems(other)).toEqual([String(item._id)]);
+      expect(await journeyItems(person._id)).toEqual([]);
+    });
+
+    it("shows both accounts' items when a linked account and an older shadow are one person", async () => {
+      const person = shadowPerson("shadow-duplicate@example.test");
+      await UserModel.create({ _id: new mongoose.Types.ObjectId(person._id), fullName: person.fullName, email: person.email });
+      const holder = await UserModel.create({ fullName: "Linked", email: "linked-duplicate@example.test", personId: person._id });
+      const shadowItem = await itemWithoutPerson(person._id, person.email);
+      const holderItem = await itemWithoutPerson(String(holder._id), "linked-duplicate@example.test");
+
+      expect((await journeyItems(person._id)).sort()).toEqual([String(shadowItem._id), String(holderItem._id)].sort());
+    });
+
+    it("an admin creating an item for a shadow customer now stamps the person on the item and its event", async () => {
+      const { syncLocalShadowUser } = await import("../Service/AuthService.js");
+      const person = shadowPerson("shadow-admin@example.test");
+      await syncLocalShadowUser(person);
+
+      const res = await request(app).post("/admin/items").send({
+        provider: "aurapay",
+        IphoneModel: "iPhone 13",
+        capacity: "128GB",
+        Plan: "Monthly",
+        monthlyPlan: 3,
+        PhonePrice: 1_200_000,
+        UserEmail: person.email,
+      });
+      expect(res.status).toBe(200);
+
+      const item = await ItemModel.findOne({ UserEmail: person.email }).lean();
+      expect(item?.personId).toBe(person._id);
+      expect(item?.UserId?.toString()).toBe(person._id);
+      expect(await outbox().findOne({ type: "easybuy.item.created" })).toMatchObject({
+        subject: { kind: "item", id: String(item!._id), personId: person._id },
+        data: { personId: person._id },
+      });
+      expect(await journeyItems(person._id)).toEqual([String(item!._id)]);
+    });
   });
 });
 

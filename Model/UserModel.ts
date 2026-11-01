@@ -5,7 +5,8 @@ interface user {
   password: string;
   role: "User" | "Admin" | "SuperAdmin";
   // The auth-service personId this record belongs to. Set by migrate-easybuy for
-  // pre-unification users; new unified users get a shadow whose _id IS the personId.
+  // pre-unification users, and on a shadow, whose _id IS the personId (syncLocalShadowUser;
+  // migrate-shadow-person-ids for the shadows made before it set the field).
   personId?: string | null;
   createdUsers: mongoose.Types.ObjectId[];
   createdByAdmin: mongoose.Types.ObjectId | null;

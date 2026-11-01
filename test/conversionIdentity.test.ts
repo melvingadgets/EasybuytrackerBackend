@@ -34,9 +34,10 @@ describe("resolveConversionPersonId", () => {
     );
   });
 
-  it("accepts a shadow account, whose _id IS the person and which has no personId field", () => {
-    // syncLocalShadowUser creates exactly this for anyone who signed up through auth — the usual case.
-    // The e2e conversion flow caught the first version of this fix refusing it.
+  it("accepts an older shadow account, whose _id IS the person and which has no personId field yet", () => {
+    // syncLocalShadowUser made exactly this until it started stamping the field, and those shadows stay
+    // this shape until migrate-shadow-person-ids reaches them. The e2e conversion flow caught the first
+    // version of this fix refusing it.
     const person = "6ae6727d4855bd96f118d5c7";
     expect(resolveConversionPersonId({ requestPersonId: person, accountPersonId: undefined, accountId: person })).toBe(
       person
