@@ -45,6 +45,10 @@ export const buildPlatformCorsOptions = (): CorsOptions => ({
     "x-request-id",
     "x-service-key",
     "Idempotency-Key",
+    // The Apply flow's one-time upload key (documentsToken). The finance app calls the documents
+    // routes straight from the browser; without this the preflight fails and the upload step reads
+    // "We couldn't reach the server" right after a successful submission.
+    "x-documents-token",
   ],
   exposedHeaders: ["x-request-id"],
   optionsSuccessStatus: 204,
