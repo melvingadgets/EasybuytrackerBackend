@@ -44,6 +44,13 @@ type PublicEasyBuyRequest = {
   reviewedAt?: Date;
   convertedAt?: Date;
   convertedEasyBoughtItemId?: mongoose.Types.ObjectId;
+  applicationType?: "online" | "physical_appearance";
+  visitDate?: string;
+  visitTimeSlot?: string;
+  visitStoreLocation?: string;
+  verificationPassCode?: string;
+  physicalVerifiedAt?: Date;
+  physicalVerifiedBy?: mongoose.Types.ObjectId;
 };
 
 const PublicEasyBuyRequestSchema = new mongoose.Schema<PublicEasyBuyRequest>(
@@ -96,6 +103,37 @@ const PublicEasyBuyRequestSchema = new mongoose.Schema<PublicEasyBuyRequest>(
       enum: ["Monthly", "Weekly"],
       required: true,
       index: true,
+    },
+    applicationType: {
+      type: String,
+      enum: ["online", "physical_appearance"],
+      default: "online",
+      index: true,
+    },
+    visitDate: {
+      type: String,
+      trim: true,
+    },
+    visitTimeSlot: {
+      type: String,
+      trim: true,
+    },
+    visitStoreLocation: {
+      type: String,
+      trim: true,
+      default: "Melvin Gadgets Hub, Computer Village, Ikeja, Lagos",
+    },
+    verificationPassCode: {
+      type: String,
+      trim: true,
+      index: true,
+    },
+    physicalVerifiedAt: {
+      type: Date,
+    },
+    physicalVerifiedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
     },
     status: {
       type: String,

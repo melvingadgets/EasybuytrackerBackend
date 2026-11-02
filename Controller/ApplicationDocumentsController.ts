@@ -6,6 +6,7 @@ import AuditLogModel from "../Model/AuditLogModel.js";
 import PublicEasyBuyRequestModel from "../Model/PublicEasyBuyRequestModel.js";
 import {
   DOCUMENTS_EDITABLE_STATUSES,
+  isDocumentEditable,
   MAX_BANK_STATEMENT_FILES,
   MAX_DOCUMENT_BYTES,
   documentsTokenMatches,
@@ -23,7 +24,7 @@ import { auditActorRole } from "../Utils/auditActor.js";
 // a SuperAdmin needs all three to approve. Nothing here logs a NIN, a file or a link.
 
 const TOKEN_HEADER = "x-documents-token";
-type LeanRequest = { _id: mongoose.Types.ObjectId; requestId: string; status: string; personId?: string | null; documentsRequired?: boolean | null };
+type LeanRequest = { _id: mongoose.Types.ObjectId; requestId: string; status: string; personId?: string | null; documentsRequired?: boolean | null; applicationType?: "online" | "physical_appearance" | null; visitDate?: string | null; visitTimeSlot?: string | null; visitStoreLocation?: string | null; verificationPassCode?: string | null; physicalVerifiedAt?: Date | null };
 type Owned = { request: LeanRequest } | { status: number; message: string };
 
 const requestIdOf = (req: Request): string => String(req.params?.requestId ?? "").trim().slice(0, 64);
@@ -50,10 +51,10 @@ const loadOwnedRequest = async (req: Request): Promise<Owned> => {
   return { request: request as unknown as LeanRequest };
 };
 
-const isEditable = (status: string) => (DOCUMENTS_EDITABLE_STATUSES as readonly string[]).includes(status);
+const isEditable = (status: string) => isDocumentEditable(status);
 
 const lockedResponse = (res: Response) =>
-  res.status(409).json({ code: "documents_locked", message: "This application has been reviewed, so its documents can no longer be changed." });
+  res.status(409).json({ code: "documents_locked", message: "This application has been approved, so its documents can no longer be changed." });
 
 const publicFile = (file: { fileId: string; format: string; bytes: number; uploadedAt: Date }) => ({
   fileId: file.fileId,
@@ -78,6 +79,12 @@ const summaryFor = (request: LeanRequest, documents: Record<string, any> | null)
     downPaymentConfirmed: Boolean(documents?.downPaymentConfirmedAt),
     nin: documents?.ninLast4 ? { provided: true, last4: documents.ninLast4 } : { provided: false },
     ninSelfie: documents?.ninSelfie ? { uploadedAt: documents.ninSelfie.uploadedAt } : null,
+    applicationType: request.applicationType ?? "online",
+    visitDate: request.visitDate ?? null,
+    visitTimeSlot: request.visitTimeSlot ?? null,
+    visitStoreLocation: request.visitStoreLocation ?? null,
+    verificationPassCode: request.verificationPassCode ?? null,
+    physicalVerifiedAt: request.physicalVerifiedAt ?? null,
     limits: { maxFileBytes: MAX_DOCUMENT_BYTES, maxBankStatements: MAX_BANK_STATEMENT_FILES },
   };
 };

@@ -28,6 +28,10 @@ type PublicEasyBuyDraft = {
   utmTerm?: string;
   utmContent?: string;
   submittedRequestId?: string;
+  applicationType?: "online" | "physical_appearance";
+  visitDate?: string;
+  visitTimeSlot?: string;
+  visitStoreLocation?: string;
 };
 
 const PublicEasyBuyDraftSchema = new mongoose.Schema<PublicEasyBuyDraft>(
@@ -50,6 +54,23 @@ const PublicEasyBuyDraftSchema = new mongoose.Schema<PublicEasyBuyDraft>(
       default: 1,
       required: true,
       index: true,
+    },
+    applicationType: {
+      type: String,
+      enum: ["online", "physical_appearance"],
+      default: "online",
+    },
+    visitDate: {
+      type: String,
+      trim: true,
+    },
+    visitTimeSlot: {
+      type: String,
+      trim: true,
+    },
+    visitStoreLocation: {
+      type: String,
+      trim: true,
     },
     status: {
       type: String,

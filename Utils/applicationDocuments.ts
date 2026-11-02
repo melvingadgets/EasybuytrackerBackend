@@ -14,7 +14,11 @@ export const MAX_BANK_STATEMENT_FILES = 3;
 /** How long the upload key given to an anonymous applicant at submission stays valid. */
 export const DOCUMENTS_TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 /** Requests that can still take documents; approval or rejection locks them. */
-export const DOCUMENTS_EDITABLE_STATUSES = ["pending_verification", "verified"] as const;
+/** Requests that can still take documents; only approval locks them (converted is also approved). */
+export const DOCUMENTS_EDITABLE_STATUSES = ["pending_verification", "verified", "rejected"] as const;
+
+export const isDocumentEditable = (status: string): boolean =>
+  !["approved", "converted"].includes(status);
 
 export type DocumentKind = "bank_statement" | "nin_selfie";
 export type RequiredDocument = "bank_statement" | "nin" | "nin_selfie";

@@ -11,6 +11,7 @@ import {
   SuperAdminApprovePublicEasyBuyRequest,
   SuperAdminRejectPublicEasyBuyRequest,
   SuperAdminConvertPublicEasyBuyRequest,
+  SuperAdminVerifyPhysicalAppearance,
   SuperAdminPreviewItemCreatedDate,
   SuperAdminPreviewReceiptUploadedDate,
   SuperAdminPreviewUserNextDueDate,

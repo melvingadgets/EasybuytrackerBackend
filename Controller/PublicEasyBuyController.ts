@@ -320,6 +320,10 @@ export const SavePublicEasyBuyDraftStep = async (req: Request, res: Response) =>
     const occupation = normalizeString(req.body?.occupation);
     const monthlyPlan = normalizePositiveInteger(req.body?.monthlyPlan);
     const weeklyPlan = normalizePositiveInteger(req.body?.weeklyPlan);
+    const draftAppType = normalizeString(req.body?.applicationType);
+    const draftVisitDate = normalizeString(req.body?.visitDate);
+    const draftVisitTimeSlot = normalizeString(req.body?.visitTimeSlot);
+    const draftVisitStoreLocation = normalizeString(req.body?.visitStoreLocation);
 
     const updatePayload: Record<string, unknown> = {
       provider: provider.slug,
@@ -345,6 +349,10 @@ export const SavePublicEasyBuyDraftStep = async (req: Request, res: Response) =>
     if (plan) updatePayload.plan = plan;
     if (address) updatePayload.address = address;
     if (occupation) updatePayload.occupation = occupation;
+    if (draftAppType) updatePayload.applicationType = draftAppType;
+    if (draftVisitDate) updatePayload.visitDate = draftVisitDate;
+    if (draftVisitTimeSlot) updatePayload.visitTimeSlot = draftVisitTimeSlot;
+    if (draftVisitStoreLocation) updatePayload.visitStoreLocation = draftVisitStoreLocation;
 
     if (step === 1) {
       if (!fullName || !email || !phone) {
@@ -460,6 +468,17 @@ export const CreatePublicEasyBuyRequest = async (req: Request, res: Response) =>
     const provider = resolveProvider(req.body?.provider as string);
     const capacity = provider.normalizeCapacityInput(req.body?.capacity);
     const plan = normalizeString(req.body?.plan) as "Monthly" | "Weekly";
+    const rawAppType = normalizeString(req.body?.applicationType);
+    const applicationType: "online" | "physical_appearance" =
+      rawAppType === "physical_appearance" ? "physical_appearance" : "online";
+    const visitDate = normalizeString(req.body?.visitDate);
+    const visitTimeSlot = normalizeString(req.body?.visitTimeSlot);
+    const visitStoreLocation =
+      normalizeString(req.body?.visitStoreLocation) || "Melvin Gadgets Hub, Computer Village, Ikeja, Lagos";
+    const verificationPassCode =
+      applicationType === "physical_appearance"
+        ? `MG-PASS-${crypto.randomBytes(3).toString("hex").toUpperCase()}`
+        : undefined;
 
     if (!fullName || !email || !phone || !iphoneModel || !capacity || !plan) {
       return res.status(400).json({
@@ -525,6 +544,11 @@ export const CreatePublicEasyBuyRequest = async (req: Request, res: Response) =>
       plan,
       status: "verified" as const,
       verifiedAt: new Date(),
+      applicationType,
+      ...(visitDate ? { visitDate } : {}),
+      ...(visitTimeSlot ? { visitTimeSlot } : {}),
+      ...(visitStoreLocation ? { visitStoreLocation } : {}),
+      ...(verificationPassCode ? { verificationPassCode } : {}),
       ...(personId ? { personId } : {}),
       documentsRequired: true,
       documentsTokenHash: hashDocumentsToken(documentsToken),
@@ -569,6 +593,11 @@ export const CreatePublicEasyBuyRequest = async (req: Request, res: Response) =>
         provider: provider.slug,
         // Shown once; send it as X-Documents-Token to add documents.
         documentsToken,
+        applicationType: created.applicationType,
+        visitDate: created.visitDate,
+        visitTimeSlot: created.visitTimeSlot,
+        visitStoreLocation: created.visitStoreLocation,
+        verificationPassCode: created.verificationPassCode,
       },
     });
   } catch (error: any) {
@@ -602,6 +631,12 @@ export const GetMyPublicEasyBuyRequests = async (req: Request, res: Response) =>
         approvedAt: 1,
         rejectedAt: 1,
         convertedAt: 1,
+        applicationType: 1,
+        visitDate: 1,
+        visitTimeSlot: 1,
+        visitStoreLocation: 1,
+        verificationPassCode: 1,
+        physicalVerifiedAt: 1,
       })
       .lean();
     res.setHeader("Cache-Control", "no-store");
@@ -761,5 +796,34 @@ export const TrackPublicEvent = async (req: Request, res: Response) => {
     return res.status(500).json({
       message: "Failed to track event",
     });
+  }
+};
+
+export const GetPublicPassDetails = async (req: Request, res: Response) => {
+  try {
+    const passCode = normalizeString(req.params?.passCode);
+    if (!passCode) return res.status(400).json({ message: "Pass code required" });
+    const request = await PublicEasyBuyRequestModel.findOne({ verificationPassCode: passCode })
+      .select({
+        _id: 0,
+        requestId: 1,
+        fullName: 1,
+        iphoneModel: 1,
+        capacity: 1,
+        plan: 1,
+        status: 1,
+        applicationType: 1,
+        visitDate: 1,
+        visitTimeSlot: 1,
+        visitStoreLocation: 1,
+        verificationPassCode: 1,
+        physicalVerifiedAt: 1,
+        documentsRequired: 1,
+      })
+      .lean();
+    if (!request) return res.status(404).json({ message: "Verification pass not found" });
+    return res.status(200).json({ message: "Pass details retrieved", data: request });
+  } catch (error: any) {
+    return res.status(400).json({ message: "Failed to look up pass" });
   }
 };

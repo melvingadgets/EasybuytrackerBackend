@@ -84,7 +84,7 @@ afterEach(async () => {
   stored.clear();
 });
 
-const apply = (token?: string) => {
+const apply = (token?: string, extra?: Record<string, unknown>) => {
   applicant += 1;
   const call = request(app)
     .post("/api/v1/public/easybuy-requests")
@@ -96,6 +96,7 @@ const apply = (token?: string) => {
       iphoneModel: "iPhone 13",
       capacity: "128GB",
       plan: "Monthly",
+      ...extra,
     });
   return token ? call.set("authorization", token) : call;
 };
@@ -240,6 +241,30 @@ describe("approval needs all three documents", () => {
     expect(locked.body.code).toBe("documents_locked");
   });
 
+  it("allows document edition while under review and when rejected, only locking upon approval", async () => {
+    const { requestId, key } = await submitAnonymously();
+    await completeDocuments(requestId, key);
+
+    // Under review (status: verified): NIN and other documents can still be updated/edited
+    const updateUnderReview = await request(app)
+      .put(docsPath(requestId, "/nin"))
+      .set("x-documents-token", key)
+      .send({ nin: "98765432101" });
+    expect(updateUnderReview.status).toBe(200);
+    expect(updateUnderReview.body.data.editable).toBe(true);
+    expect(updateUnderReview.body.data.nin.last4).toBe("2101");
+
+    // Rejected: documents remain editable so applicant can rectify any issues
+    await request(app).post(`/admin/${requestId}/reject`).send({ reason: "Bank statement unclear" });
+    const updateAfterReject = await request(app)
+      .put(docsPath(requestId, "/nin"))
+      .set("x-documents-token", key)
+      .send({ nin: "11223344556" });
+    expect(updateAfterReject.status).toBe(200);
+    expect(updateAfterReject.body.data.editable).toBe(true);
+    expect(updateAfterReject.body.data.nin.last4).toBe("4556");
+  });
+
   it("keeps approving older requests that never needed documents", async () => {
     const { requestId } = await submitAnonymously();
     await RequestModel.updateOne({ requestId }, { $unset: { documentsRequired: 1 } });
@@ -333,5 +358,53 @@ describe("SuperAdmin review", () => {
     expect(res.body.data.ninSelfie.url).toMatch(/^https:\/\/signed\.example\//);
     expect(res.body.data.complete).toBe(true);
     expect(await AuditLogModel.countDocuments({ action: "PUBLIC_REQUEST_DOCUMENTS_VIEW" })).toBe(1);
+  });
+});
+
+
+describe("Physical Appearance vs Online Application", () => {
+  it("defaults to online application when unspecified", async () => {
+    const res = await apply();
+    expect(res.status).toBe(201);
+    expect(res.body.data.applicationType).toBe("online");
+    expect(res.body.data.verificationPassCode).toBeUndefined();
+  });
+
+  it("creates a physical appearance application with verification pass and scheduled slot", async () => {
+    const res = await apply(undefined, {
+      applicationType: "physical_appearance",
+      visitDate: "2026-11-10",
+      visitTimeSlot: "10:00 AM - 12:00 PM",
+      visitStoreLocation: "Melvin Gadgets Hub, Computer Village, Ikeja, Lagos",
+    });
+    expect(res.status).toBe(201);
+    expect(res.body.data.applicationType).toBe("physical_appearance");
+    expect(res.body.data.visitDate).toBe("2026-11-10");
+    expect(res.body.data.visitTimeSlot).toBe("10:00 AM - 12:00 PM");
+    expect(res.body.data.verificationPassCode).toMatch(/^MG-PASS-[A-F0-9]{6}$/);
+
+    const passCode = res.body.data.verificationPassCode;
+    const passRes = await request(app).get(`/api/v1/public/easybuy-requests/pass/${passCode}`);
+    expect(passRes.status).toBe(200);
+    expect(passRes.body.data.requestId).toBe(res.body.data.requestId);
+    expect(passRes.body.data.applicationType).toBe("physical_appearance");
+    expect(passRes.body.data.visitStoreLocation).toBe("Melvin Gadgets Hub, Computer Village, Ikeja, Lagos");
+  });
+
+  it("reports physical appearance appointment and pass details in the documents summary", async () => {
+    const res = await apply(undefined, {
+      applicationType: "physical_appearance",
+      visitDate: "2026-11-12",
+      visitTimeSlot: "02:00 PM - 04:00 PM",
+    });
+    const { requestId, documentsToken } = res.body.data;
+    const summaryRes = await request(app)
+      .get(`/api/v1/public/easybuy-requests/${requestId}/documents`)
+      .set("x-documents-token", documentsToken);
+    expect(summaryRes.status).toBe(200);
+    expect(summaryRes.body.data.applicationType).toBe("physical_appearance");
+    expect(summaryRes.body.data.visitDate).toBe("2026-11-12");
+    expect(summaryRes.body.data.visitTimeSlot).toBe("02:00 PM - 04:00 PM");
+    expect(summaryRes.body.data.verificationPassCode).toMatch(/^MG-PASS-[A-F0-9]{6}$/);
   });
 });

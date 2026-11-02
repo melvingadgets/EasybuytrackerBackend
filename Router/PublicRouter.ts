@@ -3,6 +3,7 @@ import { requireUserToken, type TokenVerifier } from "@melvingadgets/platform-ki
 import {
   CreatePublicEasyBuyRequest,
   GetMyPublicEasyBuyRequests,
+  GetPublicPassDetails,
   GetPublicEasyBuyCatalog,
   GetPublicProviders,
   ResendPublicEasyBuyVerification,
@@ -60,6 +61,7 @@ export const createPublicRouter = (verifier: TokenVerifier | null) => {
   router.post("/easybuy-drafts/step", SavePublicEasyBuyDraftStep);
   router.post("/easybuy-requests", optionalPlatformPerson(verifier), CreatePublicEasyBuyRequest);
   router.get("/easybuy-requests/mine", signedIn, GetMyPublicEasyBuyRequests);
+  router.get("/easybuy-requests/pass/:passCode", GetPublicPassDetails);
   router.post("/easybuy-requests/resend-verification", ResendPublicEasyBuyVerification);
   router.get("/easybuy-requests/verify", VerifyPublicEasyBuyRequest);
   // Application documents: the signed-in owner, or the holder of the request's upload key.

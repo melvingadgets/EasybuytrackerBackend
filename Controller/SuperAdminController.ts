@@ -1513,3 +1513,28 @@ export const SuperAdminGetLoginStats = async (req: Request, res: Response) => {
     });
   }
 };
+
+export const SuperAdminVerifyPhysicalAppearance = async (req: Request, res: Response) => {
+  const actorId = req.user?._id;
+  if (!actorId || !can(req.user, "easybuy.superadmin.access")) {
+    return res.status(403).json({ message: "Access denied" });
+  }
+  const requestId = normalizeString(req.params?.requestId);
+  if (!requestId) return res.status(400).json({ message: "requestId is required" });
+  try {
+    const updated = await PublicEasyBuyRequestModel.findOneAndUpdate(
+      { requestId },
+      {
+        $set: {
+          physicalVerifiedAt: new Date(),
+          physicalVerifiedBy: new mongoose.Types.ObjectId(actorId),
+        },
+      },
+      { new: true }
+    ).lean();
+    if (!updated) return res.status(404).json({ message: "Request not found" });
+    return res.status(200).json({ message: "Physical appearance verified successfully", data: updated });
+  } catch (error: any) {
+    return res.status(400).json({ message: "Failed to verify physical appearance", reason: error?.message });
+  }
+};
